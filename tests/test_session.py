@@ -65,6 +65,13 @@ def test_answer_screen_offers_previews_and_keys(tmp_path):
     assert "1 again 1d   2 hard 1d   3 good 4d   4 easy 11d" in term.text
 
 
+def test_review_displays_question_with_attached_hash(tmp_path):
+    (tmp_path / "languages.md").write_text("## C#\nA language.\n", encoding="utf-8")
+    term = Fake("q")
+    assert run_review(tmp_path, None, 10, term, TODAY) == 0
+    assert "    C#\n" in term.text
+
+
 def test_quitting_keeps_earlier_grades_only(tmp_path):
     make_deck(tmp_path)
     term = Fake(" 3 q")

@@ -1,3 +1,5 @@
+import pytest
+
 from drill.deck import load_deck, normalize, parse_markdown
 
 SAMPLE = """\
@@ -66,6 +68,26 @@ def test_closing_hashes_stripped_and_answer_indent_kept():
     cards = parse_markdown("## Q ##\n    code block\n")
     assert cards[0].question == "Q"
     assert cards[0].answer == "    code block"
+
+
+@pytest.mark.parametrize("heading, question", [
+    ("## C#", "C#"),
+    ("## F# \t", "F#"),
+    ("## C# ##", "C#"),
+    ("## C#\t### \t", "C#"),
+    ("## Literal ###hash###", "Literal ###hash###"),
+])
+def test_attached_hashes_stay_in_question(heading, question):
+    card = parse_markdown(f"{heading}\nAnswer\n")[0]
+    assert card.question == question
+
+
+def test_attached_hash_changes_card_identity():
+    plain = parse_markdown("## C\nA language.\n")[0]
+    sharp = parse_markdown("## C#\nAnother language.\n")[0]
+    decorated = parse_markdown("## C# ##\nAnother language.\n")[0]
+    assert sharp.id != plain.id
+    assert sharp.id == decorated.id
 
 
 def test_normalize_ignores_cosmetic_edits():

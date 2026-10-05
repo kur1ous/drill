@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
-_QUESTION = re.compile(r"^##[ \t]+(\S.*?)[ \t]*#*[ \t]*$")
+_QUESTION = re.compile(r"^##[ \t]+(\S.*?)(?:[ \t]+#+)?[ \t]*$")
 _EMPHASIS = re.compile(r"[*_`]+")
 _SPACE = re.compile(r"\s+")
 
