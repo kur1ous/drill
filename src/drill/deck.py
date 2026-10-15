@@ -63,7 +63,11 @@ def parse_markdown(text: str, deck: str = "") -> list[Card]:
             marker = m.group(1)
             if fence is None:
                 fence = marker
-            elif marker[0] == fence[0] and len(marker) >= len(fence):
+            elif (
+                marker[0] == fence[0]
+                and len(marker) >= len(fence)
+                and not line[m.end():].strip()
+            ):
                 fence = None
         elif fence is None:
             if line.startswith("# ") or line == "#":

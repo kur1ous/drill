@@ -53,6 +53,26 @@ def test_longer_fence_needs_matching_close():
     assert len(cards) == 1 and "## still inside" in cards[0].answer
 
 
+@pytest.mark.parametrize("marker", ["```", "~~~"])
+@pytest.mark.parametrize("suffix", ["literal", " text", "\ttext"])
+def test_fence_with_trailing_content_does_not_close(marker, suffix):
+    answer = f"{marker}text\n{marker}{suffix}\n## still code\nexample\n{marker}"
+    cards = parse_markdown(f"## Show a fence\n{answer}\n\n## Real card\nreal answer\n")
+    assert [(c.question, c.answer) for c in cards] == [
+        ("Show a fence", answer),
+        ("Real card", "real answer"),
+    ]
+
+
+@pytest.mark.parametrize("marker", ["```", "~~~"])
+@pytest.mark.parametrize("ending", ["", " \t", "  "])
+def test_fence_closes_with_only_trailing_whitespace(marker, ending):
+    answer = f"{marker}text\n## still code\nexample\n  {marker}{marker[0]}{ending}"
+    cards = parse_markdown(f"## Show a fence\n{answer}\n\n## Real card\nreal answer\n")
+    assert [c.question for c in cards] == ["Show a fence", "Real card"]
+    assert cards[0].answer == answer.rstrip()
+
+
 def test_top_level_heading_ends_a_card():
     cards = parse_markdown("## A\nans\n# Next chapter\nnot part of A\n")
     assert cards[0].answer == "ans"
