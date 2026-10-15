@@ -59,9 +59,20 @@ def _inline(term: Terminal, text: str) -> str:
     return _CODE.sub(lambda m: term.accent(m.group(1)), text)
 
 
+def _layout(term: Terminal) -> tuple[str, int]:
+    margin = MARGIN if term.width >= 40 else ""
+    return margin, max(1, min(term.width - len(margin) * 2, 72))
+
+
+def _write_text(term: Terminal, text: str, *, dim: bool = False) -> None:
+    margin, width = _layout(term)
+    for line in textwrap.wrap(text, width):
+        term.write(margin + (term.dim(line) if dim else line) + "\n")
+
+
 def render_answer(term: Terminal, answer: str) -> list[str]:
-    """Light markdown: wrap prose and list items, leave code and tables alone."""
-    width = max(30, min(term.width - len(MARGIN) * 2, 72))
+    """Light markdown with hanging lists and whitespace-preserving code wraps."""
+    margin, width = _layout(term)
     out: list[str] = []
     para: list[str] = []
     fence = False
@@ -69,28 +80,33 @@ def render_answer(term: Terminal, answer: str) -> list[str]:
     def flush() -> None:
         if para:
             for line in textwrap.wrap(" ".join(para), width):
-                out.append(MARGIN + _inline(term, line))
+                out.append(margin + _inline(term, line))
             para.clear()
+
+    def literal(line: str, style) -> None:
+        line = line.expandtabs()
+        for start in range(0, max(1, len(line)), width):
+            out.append(margin + style(line[start : start + width]))
 
     for line in answer.splitlines():
         stripped = line.strip()
         if stripped.startswith(("```", "~~~")):
             flush()
             fence = not fence
-            out.append(MARGIN + term.dim(stripped))
+            literal(stripped, term.dim)
         elif fence:
-            out.append(MARGIN + term.accent(line))
+            literal(line, term.accent)
         elif not stripped:
             flush()
             out.append("")
         elif m := _LIST.match(line):
             flush()
-            hang = " " * len(m.group(0))
+            hang = " " * min(len(m.group(0)), width - 1)
             for wrapped in textwrap.wrap(line, width, subsequent_indent=hang):
-                out.append(MARGIN + _inline(term, wrapped))
+                out.append(margin + _inline(term, wrapped))
         elif line.startswith((" ", "\t", ">", "|")):
             flush()
-            out.append(MARGIN + _inline(term, line.rstrip()))
+            literal(line.rstrip(), lambda text: _inline(term, text))
         else:
             para.append(stripped)
     flush()
@@ -106,12 +122,20 @@ def _days(n: int) -> str:
 
 
 def _screen(term: Terminal, card: Card, position: int, total: int) -> None:
+    term.refresh_width()
     term.clear()
+    margin, width = _layout(term)
     count = f"{position} of {total}"
-    gap = max(2, min(term.width, 76) - len(MARGIN) - len(card.deck) - len(count))
-    term.write(f"\n{MARGIN}{term.dim(card.deck)}{' ' * gap}{term.dim(count)}\n\n\n")
-    for line in textwrap.wrap(card.question, max(30, min(term.width - 8, 72))):
-        term.write(MARGIN + term.bold(line) + "\n")
+    term.write("\n")
+    if len(card.deck) + len(count) + 2 <= width:
+        gap = width - len(card.deck) - len(count)
+        term.write(f"{margin}{term.dim(card.deck)}{' ' * gap}{term.dim(count)}\n")
+    else:
+        _write_text(term, card.deck, dim=True)
+        _write_text(term, count, dim=True)
+    term.write("\n\n")
+    for line in textwrap.wrap(card.question, width):
+        term.write(margin + term.bold(line) + "\n")
     term.write("\n")
 
 
@@ -131,21 +155,33 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
         for position, card in enumerate(queue, start=1):
             state = store.get(card.id)
             _screen(term, card, position, len(queue))
-            term.write(f"\n{MARGIN}{term.dim('space to show the answer   q to stop')}\n")
+            term.write("\n")
+            _write_text(term, "space to show the answer   q to stop", dim=True)
             if _ask(term, _REVEAL) is None:
                 summary.finished = False
                 break
 
             _screen(term, card, position, len(queue))
-            term.write(MARGIN + term.dim("-" * 12) + "\n\n")
+            margin, width = _layout(term)
+            _write_text(term, "-" * min(12, width), dim=True)
+            term.write("\n")
             for line in render_answer(term, card.answer):
                 term.write(line + "\n")
             days = preview_intervals(state, today)
-            labels = "   ".join(
+            labels = [
                 f"{term.accent(str(int(g)))} {g.name.lower()} {term.dim(_days(days[g]))}"
                 for g in Grade
-            )
-            term.write(f"\n\n{MARGIN}{labels}\n")
+            ]
+            plain = [f"{int(g)} {g.name.lower()} {_days(days[g])}" for g in Grade]
+            term.write("\n\n")
+            if len("   ".join(plain)) <= width:
+                term.write(margin + "   ".join(labels) + "\n")
+            else:
+                for label, text in zip(labels, plain):
+                    if len(text) <= width:
+                        term.write(margin + label + "\n")
+                    else:
+                        _write_text(term, text)
             key = _ask(term, set(_GRADE_KEYS))
             if key is None:
                 summary.finished = False
@@ -164,7 +200,7 @@ def _next_line(upcoming: tuple[date, int] | None) -> str:
     if not upcoming:
         return ""
     when, n = upcoming
-    return f"{MARGIN}Next: {_plural(n, 'card')} on {when.isoformat()}.\n"
+    return f"Next: {_plural(n, 'card')} on {when.isoformat()}."
 
 
 def run_review(
@@ -172,28 +208,33 @@ def run_review(
 ) -> int:
     cards = load_deck(root)
     if not cards:
-        term.write(
-            f"No cards found under {root}.\n"
-            "A card is a '## question' heading followed by its answer.\n"
-        )
+        term.refresh_width()
+        _write_text(term, f"No cards found under {root}.")
+        _write_text(term, "A card is a '## question' heading followed by its answer.")
         return 1
     live = {c.id for c in cards}
     with Store(db_path or Path(root) / ".drill.db") as store:
         states = store.states()
         queue = build_queue(cards, states, today, new_limit, store.new_introduced_on(today))
         if not queue:
-            term.write(f"\n{MARGIN}Nothing due.\n")
-            term.write(_next_line(next_due(states, live, today)) + "\n")
+            term.refresh_width()
+            term.write("\n")
+            _write_text(term, "Nothing due.")
+            _write_text(term, _next_line(next_due(states, live, today)))
+            term.write("\n")
             return 0
         summary = review(queue, store, term, today)
+        term.refresh_width()
         term.clear()
         verb = "Done" if summary.finished else "Stopped"
-        term.write(f"\n{MARGIN}{verb}. {_plural(summary.reviewed, 'card')} reviewed.\n")
+        term.write("\n")
+        _write_text(term, f"{verb}. {_plural(summary.reviewed, 'card')} reviewed.")
         if summary.counts:
             parts = [f"{summary.counts[g]} {g.name.lower()}" for g in Grade if g in summary.counts]
-            term.write(f"{MARGIN}{term.dim(', '.join(parts))}\n")
+            _write_text(term, ", ".join(parts), dim=True)
         upcoming = next_due(store.states(), live, today)
         if upcoming:
-            term.write("\n" + _next_line(upcoming))
+            term.write("\n")
+            _write_text(term, _next_line(upcoming))
         term.write("\n")
     return 0

@@ -1,4 +1,7 @@
 from datetime import date, timedelta
+import re
+
+import pytest
 
 from drill.cli import main
 from drill.deck import load_deck
@@ -159,3 +162,61 @@ def test_render_answer_wraps_prose_and_keeps_code():
 def test_cli_rejects_missing_directory(tmp_path, capsys):
     assert main(["review", str(tmp_path / "nope")]) == 2
     assert "not a directory" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("width", [30, 40, 50, 120])
+@pytest.mark.parametrize("ansi", [False, True])
+def test_review_fits_terminal_width(tmp_path, width, ansi):
+    name = "a-long-deck-name-" * 5
+    answer = "A long answer with enough words to wrap across several lines.\n\n"
+    answer += "- A list item that also needs wrapping in a narrow terminal.\n\n"
+    answer += " " * 35 + "- A deeply nested list item that must still fit.\n\n"
+    answer += "```python\n    result  =  " + "x" * 90 + "\n```\n"
+    (tmp_path / f"{name}.md").write_text(
+        "".join(f"## Question {i}: " + "long " * 20 + "\n" + answer for i in range(4)),
+        encoding="utf-8",
+    )
+    term = Fake(" 1 2 3 4", width=width)
+    term.ansi = ansi
+    assert run_review(tmp_path, None, 10, term, TODAY) == 0
+    text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", term.text)
+    assert all(len(line) <= width for line in text.splitlines())
+    for label in ("1 again 1d", "2 hard 1d", "3 good 4d", "4 easy 11d"):
+        assert label in text
+    assert "Done. 4 cards reviewed." in text
+    assert "1 again, 1 hard, 1 good, 1 easy" in " ".join(text.split())
+    assert "x" * 90 in "".join(text.split())
+    if width == 120:
+        assert "1 again 1d   2 hard 1d   3 good 4d   4 easy 11d" in text
+
+
+@pytest.mark.parametrize("widths", [(120, 30, 120), (30, 120, 30)])
+def test_review_refreshes_width_for_front_back_and_summary(tmp_path, widths):
+    make_deck(tmp_path, 1)
+    term = Fake(" 3")
+    sizes = iter(widths)
+    term.get_width = lambda: next(sizes)
+    screens = []
+    term.clear = lambda: screens.append((term.width, []))
+    term.write = lambda text: screens[-1][1].append(text)
+    assert run_review(tmp_path, None, 10, term, TODAY) == 0
+    assert [width for width, _ in screens] == list(widths)
+    for width, chunks in screens:
+        assert all(len(line) <= width for line in "".join(chunks).splitlines())
+    assert "Answer 1" not in "".join(screens[0][1])
+    assert "Answer 1" in "".join(screens[1][1])
+    assert "Done. 1 card reviewed." in "".join(screens[2][1])
+
+
+@pytest.mark.parametrize("empty", [True, False])
+def test_empty_screens_refresh_width(tmp_path, empty):
+    if not empty:
+        make_deck(tmp_path, 1)
+        run_review(tmp_path, None, 10, Fake(" 3"), TODAY)
+    term = Fake("")
+    term.get_width = lambda: 30
+    assert run_review(tmp_path, None, 10, term, TODAY) == int(empty)
+    assert term.width == 30
+    assert all(len(line) <= 30 for line in term.text.splitlines())
+    if not empty:
+        assert "Next: 1 card on 2026-03-05." in term.text

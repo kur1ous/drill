@@ -24,6 +24,11 @@ class Terminal:
     read_key: Callable[[], str]
     ansi: bool = False
     width: int = 80
+    get_width: Callable[[], int] | None = None
+
+    def refresh_width(self) -> None:
+        if self.get_width is not None:
+            self.width = self.get_width()
 
     def _wrap(self, code: str, text: str) -> str:
         return f"{code}{text}{_RESET}" if self.ansi else text
@@ -91,4 +96,4 @@ def system_terminal() -> Terminal:
         sys.stdout.write(text)
         sys.stdout.flush()
 
-    return Terminal(write, read_key, ansi, shutil.get_terminal_size((80, 24)).columns)
+    return Terminal(write, read_key, ansi, get_width=lambda: shutil.get_terminal_size((80, 24)).columns)

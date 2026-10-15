@@ -39,6 +39,8 @@ drill review notes/
 For each card: space shows the answer, then 1 again, 2 hard, 3 good, 4 easy.
 `q` stops; grades already given are kept. Up to 10 new cards are introduced per
 day (`--new N` to change it). Set `NO_COLOR=1` to turn colour off.
+Each screen adapts to the current terminal width. Narrow windows wrap the
+controls and long code lines; below 40 columns the side margins disappear.
 
 Without installing: `PYTHONPATH=src python -m drill review notes/`.
 
