@@ -84,6 +84,45 @@ def test_quitting_keeps_earlier_grades_only(tmp_path):
         assert len(store.states()) == 1
 
 
+def test_undo_returns_to_previous_card_and_replaces_grade(tmp_path):
+    make_deck(tmp_path, 3)
+    cards = load_deck(tmp_path)
+    term = Fake("bu 3 1Uu 4 2")
+    run_review(tmp_path, None, 10, term, TODAY, limit=3)
+    assert "u to undo the last grade" in term.text
+    assert "Done. 3 cards reviewed." in term.text
+    assert "1 hard, 1 good, 1 easy" in term.text
+    assert term.text.count("Question 2") == 4
+    with Store(tmp_path / ".drill.db") as store:
+        rows = store.db.execute("SELECT card_id, grade FROM reviews ORDER BY id")
+        assert [tuple(r) for r in rows] == [
+            (cards[0].id, 3), (cards[1].id, 4), (cards[2].id, 2),
+        ]
+        assert store.get(cards[1].id) == apply_grade(
+            None, cards[1].id, cards[1].deck, Grade.EASY, TODAY
+        )
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_quitting_after_undo_leaves_previous_state(tmp_path, existing):
+    make_deck(tmp_path)
+    card = load_deck(tmp_path)[0]
+    path = tmp_path / ".drill.db"
+    previous = None
+    if existing:
+        previous = apply_grade(None, card.id, card.deck, Grade.GOOD, TODAY - timedelta(days=9))
+        with Store(path) as store:
+            store.record(None, previous, Grade.GOOD)
+    term = Fake("b 1uq")
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert "Stopped. 0 cards reviewed." in term.text
+    assert "0 again" not in term.text
+    with Store(path) as store:
+        assert store.get(card.id) == previous
+        assert store.new_introduced_on(TODAY) == 0
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == int(existing)
+
+
 def test_closed_stdin_stops_cleanly(tmp_path):
     make_deck(tmp_path)
     term = Fake("")

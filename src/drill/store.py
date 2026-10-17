@@ -1,8 +1,7 @@
 """Review state in a small SQLite file next to the deck.
 
 The markdown files stay the source of truth for content; this file only holds
-what has been learned about each card id, plus an append-only review log that
-later features (undo, stats, weight fitting) read.
+what has been learned about each card id, plus a review log for stats and fitting.
 """
 
 from __future__ import annotations
@@ -44,6 +43,7 @@ CREATE INDEX reviews_card ON reviews (card_id, id);
 class Store:
     def __init__(self, path: Path | str):
         self.path = Path(path)
+        self._undo: tuple[int, str, CardState | None] | None = None
         self.db = sqlite3.connect(self.path)
         try:
             self.db.row_factory = sqlite3.Row
@@ -94,15 +94,8 @@ class Store:
         when = when or datetime.now(timezone.utc)
         elapsed = (new.last_review - prev.last_review).days if prev else 0
         with self.db:
-            self.db.execute(
-                "INSERT OR REPLACE INTO cards VALUES (?,?,?,?,?,?,?,?,?)",
-                (
-                    new.id, new.deck, new.stability, new.difficulty,
-                    new.due.isoformat(), new.last_review.isoformat(),
-                    new.introduced.isoformat(), new.reps, new.lapses,
-                ),
-            )
-            self.db.execute(
+            self._save(new)
+            row = self.db.execute(
                 "INSERT INTO reviews (card_id, reviewed_at, grade, elapsed_days, scheduled_days)"
                 " VALUES (?,?,?,?,?)",
                 (
@@ -110,6 +103,36 @@ class Store:
                     max(0, elapsed), (new.due - new.last_review).days,
                 ),
             )
+        self._undo = (row.lastrowid, new.id, prev)
+
+    def undo(self) -> bool:
+        """Undo the latest grade recorded by this open store, at most once."""
+        if self._undo is None:
+            return False
+        review_id, card_id, prev = self._undo
+        with self.db:
+            # Another session may have recorded a newer review in the meantime.
+            removed = self.db.execute(
+                "DELETE FROM reviews WHERE id = ? AND id = (SELECT MAX(id) FROM reviews)",
+                (review_id,),
+            ).rowcount
+            if removed:
+                if prev is None:
+                    self.db.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+                else:
+                    self._save(prev)
+        self._undo = None
+        return bool(removed)
+
+    def _save(self, state: CardState) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO cards VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                state.id, state.deck, state.stability, state.difficulty,
+                state.due.isoformat(), state.last_review.isoformat(),
+                state.introduced.isoformat(), state.reps, state.lapses,
+            ),
+        )
 
 
 def _state(row: sqlite3.Row) -> CardState:

@@ -39,6 +39,8 @@ drill review notes/
 
 The start screen shows the session's due and new card counts; press any key to begin.
 For each card: space shows the answer, then 1 again, 2 hard, 3 good, 4 easy.
+On the next question, press `u` before revealing the answer to undo the last grade
+and return to that card. Undo restores its schedule and removes that review.
 `q` stops; grades already given are kept. Up to 10 new cards are introduced per
 day (`--new N` to change it). Use `--limit N` with a positive integer to cap the
 total cards in a session, due cards first. Omit it to review the full queue.

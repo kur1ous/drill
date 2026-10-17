@@ -163,16 +163,32 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
         if term.read_key() in _QUIT:
             summary.finished = False
             return summary
-        for position, card in enumerate(queue, start=1):
+        position = 0
+        last_grade = None
+        while position < len(queue):
+            card = queue[position]
             state = store.get(card.id)
-            _screen(term, card, position, len(queue))
+            _screen(term, card, position + 1, len(queue))
             term.write("\n")
             _write_text(term, "space to show the answer   q to stop", dim=True)
-            if _ask(term, _REVEAL) is None:
+            undo_keys = {"u"} if last_grade is not None else set()
+            if undo_keys:
+                _write_text(term, "u to undo the last grade", dim=True)
+            key = _ask(term, _REVEAL | undo_keys)
+            if key is None:
                 summary.finished = False
                 break
+            if key == "u":
+                if store.undo():
+                    summary.reviewed -= 1
+                    summary.counts[last_grade] -= 1
+                    if summary.counts[last_grade] == 0:
+                        del summary.counts[last_grade]
+                    position -= 1
+                last_grade = None
+                continue
 
-            _screen(term, card, position, len(queue))
+            _screen(term, card, position + 1, len(queue))
             margin, width = _layout(term)
             _write_text(term, "-" * min(12, width), dim=True)
             term.write("\n")
@@ -202,6 +218,8 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
             store.record(state, apply_grade(state, card.id, card.deck, grade, today), grade)
             summary.reviewed += 1
             summary.counts[grade] = summary.counts.get(grade, 0) + 1
+            last_grade = grade
+            position += 1
     except KeyboardInterrupt:
         summary.finished = False
     return summary

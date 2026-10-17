@@ -85,3 +85,64 @@ def test_failed_initialization_closes_connection(tmp_path, monkeypatch):
         Store(path)
     with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
         connection.execute("SELECT 1")
+
+
+def test_undo_new_card_restores_daily_allowance(tmp_path):
+    path = tmp_path / "s.db"
+    with Store(path) as store:
+        assert not store.undo()
+        new = apply_grade(None, "abc", "bio", Grade.GOOD, DAY1)
+        store.record(None, new, Grade.GOOD)
+        assert store.undo()
+        assert not store.undo()
+        assert store.new_introduced_on(DAY1) == 0
+    with Store(path) as store:
+        assert store.states() == {}
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 0
+
+
+def test_undo_restores_exact_state_and_preserves_earlier_reviews(tmp_path):
+    path = tmp_path / "s.db"
+    first = apply_grade(None, "abc", "bio", Grade.GOOD, DAY1)
+    second = apply_grade(first, "abc", "renamed", Grade.AGAIN, DAY2)
+    with Store(path) as store:
+        store.record(None, first, Grade.GOOD)
+        before = [tuple(r) for r in store.db.execute("SELECT * FROM reviews")]
+        store.record(first, second, Grade.AGAIN)
+        assert store.undo()
+        assert not store.undo()
+    with Store(path) as store:
+        assert store.get("abc") == first
+        assert [tuple(r) for r in store.db.execute("SELECT * FROM reviews")] == before
+        assert not store.undo()
+
+
+def test_undo_rolls_back_if_restoring_state_fails(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        first = apply_grade(None, "abc", "bio", Grade.GOOD, DAY1)
+        second = apply_grade(first, "abc", "bio", Grade.AGAIN, DAY2)
+        store.record(None, first, Grade.GOOD)
+        store.record(first, second, Grade.AGAIN)
+        store.db.execute(
+            "CREATE TRIGGER reject_restore BEFORE INSERT ON cards "
+            "BEGIN SELECT RAISE(ABORT, 'restore failed'); END"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="restore failed"):
+            store.undo()
+        assert store.get("abc") == second
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 2
+        store.db.execute("DROP TRIGGER reject_restore")
+        assert store.undo()
+        assert store.get("abc") == first
+
+
+def test_undo_does_not_remove_another_sessions_review(tmp_path):
+    path = tmp_path / "s.db"
+    with Store(path) as store, Store(path) as other:
+        first = apply_grade(None, "abc", "bio", Grade.GOOD, DAY1)
+        second = apply_grade(first, "abc", "bio", Grade.HARD, DAY2)
+        store.record(None, first, Grade.GOOD)
+        other.record(first, second, Grade.HARD)
+        assert not store.undo()
+        assert store.get("abc") == second
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 2
