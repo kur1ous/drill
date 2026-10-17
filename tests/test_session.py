@@ -123,6 +123,83 @@ def test_quitting_after_undo_leaves_previous_state(tmp_path, existing):
         assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == int(existing)
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_again_cards_return_once_after_the_scheduled_queue(tmp_path, existing):
+    make_deck(tmp_path, 3)
+    cards = load_deck(tmp_path)
+    previous = {}
+    with Store(tmp_path / ".drill.db") as store:
+        if existing:
+            for card in cards:
+                state = apply_grade(None, card.id, card.deck, Grade.GOOD,
+                                    TODAY - timedelta(days=9))
+                store.record(None, state, Grade.GOOD)
+                previous[card.id] = state
+    term = Fake("b 1 3 1    ")
+    run_review(tmp_path, None, 10, term, TODAY, limit=3)
+    questions = re.findall(r"Question \d", term.text)
+    assert questions == [f"Question {n}" for n in (1, 1, 2, 2, 3, 3, 1, 1, 3, 3)]
+    assert "Practice only - schedule unchanged" in term.text
+    assert "Done. 3 cards reviewed." in term.text
+    assert "2 again, 1 good" in term.text
+    with Store(tmp_path / ".drill.db") as store:
+        for card, grade in zip(cards, (Grade.AGAIN, Grade.GOOD, Grade.AGAIN)):
+            assert store.get(card.id) == apply_grade(
+                previous.get(card.id), card.id, card.deck, grade, TODAY
+            )
+        rows = store.db.execute("SELECT card_id, grade FROM reviews ORDER BY id").fetchall()
+        assert len(rows) == (6 if existing else 3)
+        assert [tuple(row) for row in rows[-3:]] == [
+            (cards[0].id, 1), (cards[1].id, 3), (cards[2].id, 1),
+        ]
+
+
+@pytest.mark.parametrize("keys", ["q", " q", "", " "])
+def test_stopping_during_practice_keeps_original_grade(tmp_path, keys):
+    make_deck(tmp_path, 1)
+    card = load_deck(tmp_path)[0]
+    term = Fake("b 1" + keys)
+    run_review(tmp_path, None, 10, term, TODAY, limit=1)
+    assert "Stopped. 1 card reviewed." in term.text
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.get(card.id) == apply_grade(None, card.id, card.deck, Grade.AGAIN, TODAY)
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("replacement", ["1  ", "3"])
+def test_undo_on_first_practice_card_replaces_last_scheduled_grade(tmp_path, replacement):
+    make_deck(tmp_path, 1)
+    term = Fake("b 1u " + replacement)
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert "Done. 1 card reviewed." in term.text
+    assert term.text.count("Question 1") == (7 if replacement[0] == "1" else 5)
+    with Store(tmp_path / ".drill.db") as store:
+        rows = store.db.execute("SELECT grade FROM reviews").fetchall()
+        assert [row[0] for row in rows] == [int(replacement[0])]
+
+
+def test_undo_again_removes_only_its_own_pending_practice(tmp_path):
+    make_deck(tmp_path, 3)
+    term = Fake("b 1 1u 4 3  ")
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert "Done. 3 cards reviewed." in term.text
+    assert "1 again, 1 good, 1 easy" in term.text
+    questions = re.findall(r"Question \d", term.text)
+    assert questions[-2:] == ["Question 1", "Question 1"]
+    assert questions.count("Question 2") == 4
+
+
+def test_practice_does_not_offer_undo_after_a_practice_card(tmp_path):
+    make_deck(tmp_path)
+    term = Fake("b 1 1  u  ")
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert "Done. 2 cards reviewed." in term.text
+    last_question = term.text.rsplit("Question 2", 2)[1]
+    assert "u to undo" not in last_question
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 2
+
+
 def test_closed_stdin_stops_cleanly(tmp_path):
     make_deck(tmp_path)
     term = Fake("")
@@ -281,7 +358,7 @@ def test_review_fits_terminal_width(tmp_path, width, ansi):
         "".join(f"## Question {i}: " + "long " * 20 + "\n" + answer for i in range(4)),
         encoding="utf-8",
     )
-    term = Fake("b 1 2 3 4", width=width)
+    term = Fake("b 1 2 3 4  ", width=width)
     term.ansi = ansi
     assert run_review(tmp_path, None, 10, term, TODAY) == 0
     text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", term.text)

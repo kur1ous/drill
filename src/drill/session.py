@@ -151,6 +151,8 @@ def _ask(term: Terminal, wanted: set[str]) -> str | None:
 
 def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summary:
     summary = Summary()
+    queue = list(queue)
+    scheduled_count = len(queue)
     try:
         states = store.states()
         due = sum(card.id in states for card in queue)
@@ -167,9 +169,12 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
         last_grade = None
         while position < len(queue):
             card = queue[position]
+            practice = position >= scheduled_count
             state = store.get(card.id)
             _screen(term, card, position + 1, len(queue))
             term.write("\n")
+            if practice:
+                _write_text(term, "Practice only - schedule unchanged", dim=True)
             _write_text(term, "space to show the answer   q to stop", dim=True)
             undo_keys = {"u"} if last_grade is not None else set()
             if undo_keys:
@@ -184,6 +189,8 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
                     summary.counts[last_grade] -= 1
                     if summary.counts[last_grade] == 0:
                         del summary.counts[last_grade]
+                    if last_grade == Grade.AGAIN:
+                        queue.pop()
                     position -= 1
                 last_grade = None
                 continue
@@ -194,6 +201,16 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
             term.write("\n")
             for line in render_answer(term, card.answer):
                 term.write(line + "\n")
+            if practice:
+                term.write("\n")
+                _write_text(term, "Practice only - schedule unchanged", dim=True)
+                _write_text(term, "space to continue   q to stop", dim=True)
+                if _ask(term, _REVEAL) is None:
+                    summary.finished = False
+                    break
+                last_grade = None
+                position += 1
+                continue
             days = preview_intervals(state, today)
             labels = [
                 f"{term.accent(str(int(g)))} {g.name.lower()} {term.dim(_days(days[g]))}"
@@ -218,6 +235,8 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
             store.record(state, apply_grade(state, card.id, card.deck, grade, today), grade)
             summary.reviewed += 1
             summary.counts[grade] = summary.counts.get(grade, 0) + 1
+            if grade == Grade.AGAIN:
+                queue.append(card)
             last_grade = grade
             position += 1
     except KeyboardInterrupt:

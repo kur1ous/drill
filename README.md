@@ -41,9 +41,12 @@ The start screen shows the session's due and new card counts; press any key to b
 For each card: space shows the answer, then 1 again, 2 hard, 3 good, 4 easy.
 On the next question, press `u` before revealing the answer to undo the last grade
 and return to that card. Undo restores its schedule and removes that review.
+Cards graded again return once at the end for practice: space reveals the answer,
+then space continues. Practice does not change schedules, history or review counts.
 `q` stops; grades already given are kept. Up to 10 new cards are introduced per
 day (`--new N` to change it). Use `--limit N` with a positive integer to cap the
-total cards in a session, due cards first. Omit it to review the full queue.
+distinct cards in a session, due cards first; practice repeats are extra.
+Omit it to review the full queue.
 Set `NO_COLOR=1` to turn colour off.
 Each screen adapts to the current terminal width. Narrow windows wrap the
 controls and long code lines; below 40 columns the side margins disappear.
