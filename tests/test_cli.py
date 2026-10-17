@@ -21,11 +21,35 @@ def test_no_command_prints_help(capsys):
     assert "usage: drill" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("limit", ["0", "-1", "1.5", "many"])
+def test_review_rejects_invalid_session_limit(tmp_path, capsys, limit):
+    with pytest.raises(SystemExit) as exc:
+        main(["review", str(tmp_path), "--limit", limit])
+    assert exc.value.code == 2
+    assert "--limit" in capsys.readouterr().err
+    assert not (tmp_path / ".drill.db").exists()
+
+
+def test_review_cli_caps_session(tmp_path, monkeypatch):
+    (tmp_path / "notes.md").write_text("## One\nA\n## Two\nB\n", encoding="utf-8")
+    keys = iter("b 3 3")
+    output = []
+    monkeypatch.setattr(
+        "drill.term.system_terminal",
+        lambda: Terminal(output.append, lambda: next(keys, EOF_KEY), ansi=False),
+    )
+    assert main(["review", str(tmp_path), "--limit", "1"]) == 0
+    assert "0 due, 1 new" in "".join(output)
+    assert "Done. 1 card reviewed." in "".join(output)
+    with Store(tmp_path / ".drill.db") as store:
+        assert len(store.states()) == 1
+
+
 @pytest.fixture
 def deck_file(tmp_path, monkeypatch):
     path = tmp_path / "notes.md"
     path.write_text("## Question\nAnswer\n", encoding="utf-8")
-    keys = iter(" 3")
+    keys = iter("b 3")
     monkeypatch.setattr(
         "drill.term.system_terminal",
         lambda: Terminal(lambda text: None, lambda: next(keys, EOF_KEY)),

@@ -37,9 +37,12 @@ pip install -e .          # or: pipx install .
 drill review notes/
 ```
 
+The start screen shows the session's due and new card counts; press any key to begin.
 For each card: space shows the answer, then 1 again, 2 hard, 3 good, 4 easy.
 `q` stops; grades already given are kept. Up to 10 new cards are introduced per
-day (`--new N` to change it). Set `NO_COLOR=1` to turn colour off.
+day (`--new N` to change it). Use `--limit N` with a positive integer to cap the
+total cards in a session, due cards first. Omit it to review the full queue.
+Set `NO_COLOR=1` to turn colour off.
 Each screen adapts to the current terminal width. Narrow windows wrap the
 controls and long code lines; below 40 columns the side margins disappear.
 

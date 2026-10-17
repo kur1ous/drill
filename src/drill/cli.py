@@ -25,6 +25,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--new", type=int, default=10, metavar="N", help="new cards per day (default 10)"
     )
     review.add_argument(
+        "--limit", type=int, metavar="N", help="maximum cards per session (positive integer)"
+    )
+    review.add_argument(
         "--db", type=Path, metavar="FILE", help="state file (default: DIR/.drill.db)"
     )
     return parser
@@ -54,12 +57,17 @@ def main(argv: list[str] | None = None) -> int:
         from drill.session import run_review
         from drill.term import system_terminal
 
+        if args.limit is not None and args.limit <= 0:
+            parser.error("--limit must be a positive integer")
         if not args.dir.is_dir():
             print(f"drill: not a directory: {args.dir}", file=sys.stderr)
             return 2
         db_path = args.db or args.dir / ".drill.db"
         try:
-            return run_review(args.dir, db_path, max(0, args.new), system_terminal(), date.today())
+            return run_review(
+                args.dir, db_path, max(0, args.new), system_terminal(), date.today(),
+                limit=args.limit,
+            )
         except DeckReadError as exc:
             print(f"drill: {exc}", file=sys.stderr)
         except sqlite3.Error as exc:

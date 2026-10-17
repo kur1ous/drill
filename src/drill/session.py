@@ -152,6 +152,17 @@ def _ask(term: Terminal, wanted: set[str]) -> str | None:
 def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summary:
     summary = Summary()
     try:
+        states = store.states()
+        due = sum(card.id in states for card in queue)
+        term.refresh_width()
+        term.clear()
+        term.write("\n")
+        _write_text(term, f"{due} due, {len(queue) - due} new")
+        term.write("\n")
+        _write_text(term, "Press any key to begin   q to stop", dim=True)
+        if term.read_key() in _QUIT:
+            summary.finished = False
+            return summary
         for position, card in enumerate(queue, start=1):
             state = store.get(card.id)
             _screen(term, card, position, len(queue))
@@ -204,7 +215,8 @@ def _next_line(upcoming: tuple[date, int] | None) -> str:
 
 
 def run_review(
-    root: Path, db_path: Path | None, new_limit: int, term: Terminal, today: date
+    root: Path, db_path: Path | None, new_limit: int, term: Terminal, today: date,
+    *, limit: int | None = None,
 ) -> int:
     cards = load_deck(root)
     if not cards:
@@ -216,6 +228,8 @@ def run_review(
     with Store(db_path or Path(root) / ".drill.db") as store:
         states = store.states()
         queue = build_queue(cards, states, today, new_limit, store.new_introduced_on(today))
+        if limit is not None:
+            queue = queue[:limit]
         if not queue:
             term.refresh_width()
             term.write("\n")

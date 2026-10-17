@@ -49,7 +49,7 @@ def test_queue_puts_due_first_then_limited_new(tmp_path):
 
 def test_review_records_each_grade(tmp_path):
     make_deck(tmp_path)
-    term = Fake(" 3 4")
+    term = Fake("b 3 4")
     assert run_review(tmp_path, None, 10, term, TODAY) == 0
     assert "Done. 2 cards reviewed." in term.text
     assert "1 good, 1 easy" in term.text
@@ -62,7 +62,7 @@ def test_review_records_each_grade(tmp_path):
 
 def test_answer_screen_offers_previews_and_keys(tmp_path):
     make_deck(tmp_path, 1)
-    term = Fake(" 3")
+    term = Fake("b 3")
     run_review(tmp_path, None, 10, term, TODAY)
     assert "Question 1" in term.text and "Answer 1" in term.text
     assert "1 again 1d   2 hard 1d   3 good 4d   4 easy 11d" in term.text
@@ -70,14 +70,14 @@ def test_answer_screen_offers_previews_and_keys(tmp_path):
 
 def test_review_displays_question_with_attached_hash(tmp_path):
     (tmp_path / "languages.md").write_text("## C#\nA language.\n", encoding="utf-8")
-    term = Fake("q")
+    term = Fake("bq")
     assert run_review(tmp_path, None, 10, term, TODAY) == 0
     assert "    C#\n" in term.text
 
 
 def test_quitting_keeps_earlier_grades_only(tmp_path):
     make_deck(tmp_path)
-    term = Fake(" 3 q")
+    term = Fake("b 3 q")
     run_review(tmp_path, None, 10, term, TODAY)
     assert "Stopped. 1 card reviewed." in term.text
     with Store(tmp_path / ".drill.db") as store:
@@ -91,9 +91,75 @@ def test_closed_stdin_stops_cleanly(tmp_path):
     assert "Stopped. 0 cards reviewed." in term.text
 
 
+@pytest.mark.parametrize("key", ["q", "\x03", ""])
+def test_quitting_start_screen_leaves_history_untouched(tmp_path, key):
+    make_deck(tmp_path)
+    term = Fake(key)
+    assert run_review(tmp_path, None, 10, term, TODAY) == 0
+    assert "0 due, 2 new" in term.text
+    assert "Press any key to begin" in term.text
+    assert "Question 1" not in term.text
+    assert "Stopped. 0 cards reviewed." in term.text
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.states() == {}
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 0
+
+
+def test_interrupt_at_start_stops_cleanly(tmp_path):
+    make_deck(tmp_path)
+    term = Fake("")
+
+    def interrupt():
+        raise KeyboardInterrupt
+
+    term.read_key = interrupt
+    assert run_review(tmp_path, None, 10, term, TODAY) == 0
+    assert "Stopped. 0 cards reviewed." in term.text
+
+
+@pytest.mark.parametrize("limit, due_count, new_count", [
+    (1, 1, 0), (2, 2, 0), (3, 2, 1), (20, 2, 2), (None, 2, 2),
+])
+def test_session_limit_keeps_due_first_and_counts_selected_cards(
+    tmp_path, limit, due_count, new_count
+):
+    make_deck(tmp_path, 5)
+    cards = load_deck(tmp_path)
+    with Store(tmp_path / ".drill.db") as store:
+        for card, day in [(cards[2], TODAY - timedelta(days=9)),
+                          (cards[1], TODAY - timedelta(days=8)),
+                          (cards[4], TODAY)]:
+            state = apply_grade(None, card.id, card.deck, Grade.GOOD, day)
+            store.record(None, state, Grade.GOOD)
+    count = due_count + new_count
+    term = Fake("b" + " 3" * 5)
+    assert run_review(tmp_path, None, 10, term, TODAY, limit=limit) == 0
+    assert f"{due_count} due, {new_count} new" in term.text
+    assert f"{count} of {count}" in term.text
+    expected = [cards[2], cards[1], cards[0], cards[3]][:count]
+    with Store(tmp_path / ".drill.db") as store:
+        rows = store.db.execute("SELECT card_id FROM reviews ORDER BY rowid").fetchall()
+        assert [row[0] for row in rows[3:]] == [card.id for card in expected]
+    if limit == 1:
+        assert "Question 2" not in term.text
+
+
+def test_session_limit_does_not_consume_unreviewed_new_allowance(tmp_path):
+    make_deck(tmp_path, 5)
+    run_review(tmp_path, None, 3, Fake("b 3"), TODAY, limit=1)
+    term = Fake("b 3 3")
+    run_review(tmp_path, None, 3, term, TODAY)
+    assert "0 due, 2 new" in term.text
+    assert "Done. 2 cards reviewed." in term.text
+    term = Fake("")
+    run_review(tmp_path, None, 3, term, TODAY)
+    assert "Nothing due." in term.text
+    assert "Press any key" not in term.text
+
+
 def test_other_keys_are_ignored(tmp_path):
     make_deck(tmp_path, 1)
-    term = Fake("x 9 z 5 2")  # 5 and 9 are not grades; the space reveals, 2 grades
+    term = Fake("bx 9 z 5 2")  # 5 and 9 are not grades; the space reveals, 2 grades
     run_review(tmp_path, None, 10, term, TODAY)
     with Store(tmp_path / ".drill.db") as store:
         (state,) = store.states().values()
@@ -103,7 +169,7 @@ def test_other_keys_are_ignored(tmp_path):
 
 def test_second_session_same_day_has_nothing_due(tmp_path):
     make_deck(tmp_path)
-    run_review(tmp_path, None, 10, Fake(" 3 3"), TODAY)
+    run_review(tmp_path, None, 10, Fake("b 3 3"), TODAY)
     term = Fake("")
     assert run_review(tmp_path, None, 10, term, TODAY) == 0
     assert "Nothing due." in term.text
@@ -112,20 +178,20 @@ def test_second_session_same_day_has_nothing_due(tmp_path):
 
 def test_new_card_limit_applies_per_day(tmp_path):
     make_deck(tmp_path, 3)
-    run_review(tmp_path, None, 1, Fake(" 3"), TODAY)
+    run_review(tmp_path, None, 1, Fake("b 3"), TODAY)
     term = Fake("")
     run_review(tmp_path, None, 1, term, TODAY)
     assert "Nothing due." in term.text
-    later = Fake(" 3")
+    later = Fake("b 3")
     run_review(tmp_path, None, 1, later, TODAY + timedelta(days=1))
     assert "1 card reviewed" in later.text
 
 
 def test_card_reviewed_again_when_due(tmp_path):
     make_deck(tmp_path, 1)
-    run_review(tmp_path, None, 10, Fake(" 3"), TODAY)
+    run_review(tmp_path, None, 10, Fake("b 3"), TODAY)
     day = TODAY + timedelta(days=4)
-    term = Fake(" 3")
+    term = Fake("b 3")
     run_review(tmp_path, None, 10, term, day)
     assert "3 good 15d" in term.text  # preview at the moment of the second review
     with Store(tmp_path / ".drill.db") as store:
@@ -141,7 +207,7 @@ def test_empty_folder_is_reported(tmp_path):
 
 def test_review_state_follows_a_reworded_question(tmp_path):
     make_deck(tmp_path, 1)
-    run_review(tmp_path, None, 10, Fake(" 3"), TODAY)
+    run_review(tmp_path, None, 10, Fake("b 3"), TODAY)
     (tmp_path / "deck.md").write_text("## question 1?\nA better, longer answer.\n", encoding="utf-8")
     term = Fake("")
     run_review(tmp_path, None, 10, term, TODAY)
@@ -176,7 +242,7 @@ def test_review_fits_terminal_width(tmp_path, width, ansi):
         "".join(f"## Question {i}: " + "long " * 20 + "\n" + answer for i in range(4)),
         encoding="utf-8",
     )
-    term = Fake(" 1 2 3 4", width=width)
+    term = Fake("b 1 2 3 4", width=width)
     term.ansi = ansi
     assert run_review(tmp_path, None, 10, term, TODAY) == 0
     text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", term.text)
@@ -190,10 +256,10 @@ def test_review_fits_terminal_width(tmp_path, width, ansi):
         assert "1 again 1d   2 hard 1d   3 good 4d   4 easy 11d" in text
 
 
-@pytest.mark.parametrize("widths", [(120, 30, 120), (30, 120, 30)])
-def test_review_refreshes_width_for_front_back_and_summary(tmp_path, widths):
+@pytest.mark.parametrize("widths", [(30, 120, 30, 120), (120, 30, 120, 30)])
+def test_review_refreshes_width_for_start_front_back_and_summary(tmp_path, widths):
     make_deck(tmp_path, 1)
-    term = Fake(" 3")
+    term = Fake("b 3")
     sizes = iter(widths)
     term.get_width = lambda: next(sizes)
     screens = []
@@ -204,15 +270,16 @@ def test_review_refreshes_width_for_front_back_and_summary(tmp_path, widths):
     for width, chunks in screens:
         assert all(len(line) <= width for line in "".join(chunks).splitlines())
     assert "Answer 1" not in "".join(screens[0][1])
-    assert "Answer 1" in "".join(screens[1][1])
-    assert "Done. 1 card reviewed." in "".join(screens[2][1])
+    assert "Answer 1" not in "".join(screens[1][1])
+    assert "Answer 1" in "".join(screens[2][1])
+    assert "Done. 1 card reviewed." in "".join(screens[3][1])
 
 
 @pytest.mark.parametrize("empty", [True, False])
 def test_empty_screens_refresh_width(tmp_path, empty):
     if not empty:
         make_deck(tmp_path, 1)
-        run_review(tmp_path, None, 10, Fake(" 3"), TODAY)
+        run_review(tmp_path, None, 10, Fake("b 3"), TODAY)
     term = Fake("")
     term.get_width = lambda: 30
     assert run_review(tmp_path, None, 10, term, TODAY) == int(empty)
