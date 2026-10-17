@@ -14,6 +14,10 @@ _EMPHASIS = re.compile(r"[*_`]+")
 _SPACE = re.compile(r"\s+")
 
 
+class DeckReadError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class Card:
     id: str
@@ -106,7 +110,12 @@ def load_deck(root: Path | str) -> list[Card]:
         if any(part.startswith(".") for part in rel.parts):
             continue
         deck = rel.with_suffix("").as_posix()
-        text = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise DeckReadError(f"cannot read deck {path}: expected UTF-8 text") from exc
+        except OSError as exc:
+            raise DeckReadError(f"cannot read deck {path}: {exc.strerror or exc}") from exc
         for card in parse_markdown(text, deck):
             n = seen.get(card.id, 0)
             seen[card.id] = n + 1

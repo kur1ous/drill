@@ -1,9 +1,11 @@
 import argparse
+import sqlite3
 import sys
 from datetime import date
 from pathlib import Path
 
 from drill import __version__
+from drill.deck import DeckReadError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,5 +40,12 @@ def main(argv: list[str] | None = None) -> int:
         if not args.dir.is_dir():
             print(f"drill: not a directory: {args.dir}", file=sys.stderr)
             return 2
-        return run_review(args.dir, args.db, max(0, args.new), system_terminal(), date.today())
+        db_path = args.db or args.dir / ".drill.db"
+        try:
+            return run_review(args.dir, db_path, max(0, args.new), system_terminal(), date.today())
+        except DeckReadError as exc:
+            print(f"drill: {exc}", file=sys.stderr)
+        except sqlite3.Error as exc:
+            print(f"drill: cannot use database {db_path}: {exc}", file=sys.stderr)
+        return 2
     return 0

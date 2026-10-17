@@ -45,17 +45,20 @@ class Store:
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self.db = sqlite3.connect(self.path)
-        self.db.row_factory = sqlite3.Row
-        version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version == 0:
-            with self.db:
-                self.db.executescript(_SCHEMA)
-                self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        elif version != SCHEMA_VERSION:
+        try:
+            self.db.row_factory = sqlite3.Row
+            version = self.db.execute("PRAGMA user_version").fetchone()[0]
+            if version == 0:
+                with self.db:
+                    self.db.executescript(_SCHEMA)
+                    self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            elif version != SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"{self.path} has schema version {version}, this drill expects {SCHEMA_VERSION}"
+                )
+        except Exception:
             self.db.close()
-            raise RuntimeError(
-                f"{self.path} has schema version {version}, this drill expects {SCHEMA_VERSION}"
-            )
+            raise
 
     def __enter__(self) -> Store:
         return self

@@ -74,3 +74,14 @@ def test_refuses_a_newer_schema(tmp_path):
     db.close()
     with pytest.raises(RuntimeError, match="schema version 99"):
         Store(path)
+
+
+def test_failed_initialization_closes_connection(tmp_path, monkeypatch):
+    path = tmp_path / "broken.db"
+    path.write_bytes(b"not a sqlite database")
+    connection = sqlite3.connect(path)
+    monkeypatch.setattr("drill.store.sqlite3.connect", lambda path: connection)
+    with pytest.raises(sqlite3.DatabaseError, match="not a database"):
+        Store(path)
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1")

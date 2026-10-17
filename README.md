@@ -28,6 +28,7 @@ Makes most of the cell's ATP. It has its own DNA, inherited from the mother.
 
 Files can be nested in folders. A heading with no body is treated as a section
 title, not a card. `##` inside a fenced code block is left alone.
+Deck files must be UTF-8 text.
 
 ## Run
 
@@ -48,6 +49,8 @@ Without installing: `PYTHONPATH=src python -m drill review notes/`.
 
 In `.drill.db` inside the deck folder (`--db FILE` to put it elsewhere). It is an
 ordinary SQLite file: commit it with your notes or add it to `.gitignore`.
+Unreadable decks and database errors (including corruption or locks) report
+the affected file on stderr and exit with code 2, without a traceback.
 
 A card is identified by a hash of its question, ignoring case, spacing, markdown
 emphasis and a trailing `?`. So you can rewrite an answer, move a card to another
