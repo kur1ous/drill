@@ -1,6 +1,6 @@
 import pytest
 
-from drill.deck import load_deck, normalize, parse_markdown
+from drill.deck import check_deck, load_deck, normalize, parse_markdown
 
 SAMPLE = """\
 # Cell biology
@@ -162,3 +162,46 @@ def test_moving_a_card_between_files_keeps_its_id(tmp_path):
     before = load_deck(tmp_path)[0].id
     (tmp_path / "old.md").rename(tmp_path / "new.md")
     assert load_deck(tmp_path)[0].id == before
+
+
+def test_check_reports_empty_files_and_heading_locations(tmp_path):
+    (tmp_path / "empty.md").write_text("# Notes\nIntro only.\n", encoding="utf-8")
+    (tmp_path / "headings.md").write_text(
+        "## First\n \t\n## Second\n# Chapter\n## Last\n", encoding="utf-8"
+    )
+    assert check_deck(tmp_path) == [
+        "empty.md:1: no cards",
+        "headings.md:1: no cards",
+        "headings.md:1: empty body for 'First'",
+        "headings.md:3: empty body for 'Second'",
+        "headings.md:5: empty body for 'Last'",
+    ]
+
+
+def test_check_reports_exact_duplicates_across_and_within_files(tmp_path):
+    (tmp_path / "a.md").write_text(
+        "## Same?\none\n## Same? ##\ntwo\n## same?\nthree\n"
+        "## *Same*?\nfour\n## Same\nfive\n", encoding="utf-8"
+    )
+    nested = tmp_path / "unit"
+    nested.mkdir()
+    (nested / "b.md").write_text("## Same?\n", encoding="utf-8")
+    assert check_deck(tmp_path) == [
+        "a.md:3: duplicate question 'Same?' (first at a.md:1)",
+        "unit/b.md:1: no cards",
+        "unit/b.md:1: empty body for 'Same?'",
+        "unit/b.md:1: duplicate question 'Same?' (first at a.md:1)",
+    ]
+
+
+@pytest.mark.parametrize("marker", ["```", "~~~"])
+def test_check_uses_parser_fences_and_ignores_hidden_paths(tmp_path, marker):
+    (tmp_path / "a.md").write_text(
+        f"\ufeff## Q\r\n{marker}\r\n## Q\r\n{marker}\r\n", encoding="utf-8"
+    )
+    (tmp_path / ".hidden.md").write_bytes(b"\xff")
+    (tmp_path / "notes.txt").write_text("No cards", encoding="utf-8")
+    hidden = tmp_path / ".hidden"
+    hidden.mkdir()
+    (hidden / "b.md").write_bytes(b"\xff")
+    assert check_deck(tmp_path) == []

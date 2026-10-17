@@ -45,6 +45,13 @@ controls and long code lines; below 40 columns the side margins disappear.
 
 Without installing: `PYTHONPATH=src python -m drill review notes/`.
 
+Run `drill check notes/` to report files with no cards, `##` headings with empty
+bodies, and exact duplicate questions within or across files. Locations are
+`file:line`, relative to the deck folder; duplicates also name the first occurrence.
+Questions are compared as parsed, including case, punctuation and emphasis.
+Hidden files and folders are skipped, as in review. The check leaves review history
+untouched and exits with code 0 for no issues, 1 for findings, or 2 for read errors.
+
 ## Where review history lives
 
 In `.drill.db` inside the deck folder (`--db FILE` to put it elsewhere). It is an

@@ -33,9 +33,10 @@ def deck_file(tmp_path, monkeypatch):
     return path
 
 
-def test_non_utf8_deck_reports_file(deck_file, capsys):
+@pytest.mark.parametrize("command", ["review", "check"])
+def test_non_utf8_deck_reports_file(deck_file, capsys, command):
     deck_file.write_bytes(b"## Question\n\xff\n")
-    assert main(["review", str(deck_file.parent)]) == 2
+    assert main([command, str(deck_file.parent)]) == 2
     error = capsys.readouterr().err
     assert str(deck_file) in error
     assert "UTF-8" in error
@@ -43,7 +44,8 @@ def test_non_utf8_deck_reports_file(deck_file, capsys):
     assert not (deck_file.parent / ".drill.db").exists()
 
 
-def test_unreadable_deck_reports_file(deck_file, monkeypatch, capsys):
+@pytest.mark.parametrize("command", ["review", "check"])
+def test_unreadable_deck_reports_file(deck_file, monkeypatch, capsys, command):
     read_text = Path.read_text
 
     def unreadable(path, *args, **kwargs):
@@ -52,11 +54,41 @@ def test_unreadable_deck_reports_file(deck_file, monkeypatch, capsys):
         return read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", unreadable)
-    assert main(["review", str(deck_file.parent)]) == 2
+    assert main([command, str(deck_file.parent)]) == 2
     error = capsys.readouterr().err
     assert str(deck_file) in error
     assert "Permission denied" in error
     assert "Traceback" not in error
+
+
+@pytest.mark.parametrize("contents, status, output", [
+    ("## Q\nAnswer\n", 0, "No issues found.\n"),
+    ("## Q\n", 1, "notes.md:1: no cards\nnotes.md:1: empty body for 'Q'\n"),
+])
+def test_check_status_and_output_without_database(tmp_path, capsys, contents, status, output):
+    (tmp_path / "notes.md").write_text(contents, encoding="utf-8")
+    assert main(["check", str(tmp_path)]) == status
+    captured = capsys.readouterr()
+    assert captured.out == output
+    assert captured.err == ""
+    assert not (tmp_path / ".drill.db").exists()
+
+
+def test_check_does_not_open_existing_database(tmp_path, capsys):
+    database = tmp_path / ".drill.db"
+    database.write_bytes(b"not a database")
+    assert main(["check", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == "No issues found.\n"
+    assert database.read_bytes() == b"not a database"
+
+
+@pytest.mark.parametrize("existing_file", [False, True])
+def test_check_requires_a_directory(tmp_path, capsys, existing_file):
+    path = tmp_path / "notes.md"
+    if existing_file:
+        path.write_text("## Q\nAnswer\n", encoding="utf-8")
+    assert main(["check", str(path)]) == 2
+    assert capsys.readouterr().err == f"drill: not a directory: {path}\n"
 
 
 @pytest.mark.parametrize("custom_db", [False, True])

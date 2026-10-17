@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from drill import __version__
-from drill.deck import DeckReadError
+from drill.deck import DeckReadError, check_deck
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -15,6 +15,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"drill {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
+
+    check = sub.add_parser("check", help="check decks for empty cards and duplicates")
+    check.add_argument("dir", type=Path, help="folder of markdown decks")
 
     review = sub.add_parser("review", help="review the cards that are due")
     review.add_argument("dir", type=Path, help="folder of markdown decks")
@@ -33,6 +36,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help(sys.stderr)
         return 2
+    if args.command == "check":
+        if not args.dir.is_dir():
+            print(f"drill: not a directory: {args.dir}", file=sys.stderr)
+            return 2
+        try:
+            issues = check_deck(args.dir)
+        except DeckReadError as exc:
+            print(f"drill: {exc}", file=sys.stderr)
+            return 2
+        for issue in issues:
+            print(issue)
+        if not issues:
+            print("No issues found.")
+        return int(bool(issues))
     if args.command == "review":
         from drill.session import run_review
         from drill.term import system_terminal
