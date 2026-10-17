@@ -26,22 +26,27 @@ class CardState:
     lapses: int = 0
 
 
+def _next_memory(state: CardState | None, grade: Grade, today: date) -> fsrs.Memory:
+    if state is None:
+        return fsrs.initial(grade)
+    elapsed = max(0, (today - state.last_review).days)
+    return fsrs.next_memory(fsrs.Memory(state.stability, state.difficulty), grade, elapsed)
+
+
 def apply_grade(
     state: CardState | None, card_id: str, deck: str, grade: Grade, today: date
 ) -> CardState:
     """New state after grading. `state` is None for a card never reviewed."""
+    mem = _next_memory(state, grade, today)
     if state is None:
-        mem = fsrs.initial(grade)
         lapses = 0
         reps = 1
         introduced = today
     else:
-        elapsed = max(0, (today - state.last_review).days)
-        mem = fsrs.next_memory(fsrs.Memory(state.stability, state.difficulty), grade, elapsed)
         lapses = state.lapses + (grade == Grade.AGAIN)
         reps = state.reps + 1
         introduced = state.introduced
-    days = fsrs.interval(mem.stability)
+    days = preview_intervals(state, today)[grade]
     return CardState(
         id=card_id,
         deck=deck,
@@ -57,9 +62,11 @@ def apply_grade(
 
 def preview_intervals(state: CardState | None, today: date) -> dict[Grade, int]:
     """Days until next review for each possible grade, for the answer screen."""
-    out = {}
-    for grade in Grade:
-        after = apply_grade(state, state.id if state else "", "", grade, today)
-        out[grade] = (after.due - today).days
+    out = {grade: fsrs.interval(_next_memory(state, grade, today).stability) for grade in Grade}
+    # Reserve room below the cap so hard, good and easy stay a day apart.
+    out[Grade.HARD] = min(out[Grade.HARD], fsrs.MAX_INTERVAL - 2)
+    out[Grade.GOOD] = min(max(out[Grade.GOOD], out[Grade.HARD] + 1), fsrs.MAX_INTERVAL - 1)
+    out[Grade.EASY] = max(out[Grade.EASY], out[Grade.GOOD] + 1)
+    out[Grade.AGAIN] = min(out[Grade.AGAIN], out[Grade.HARD])
     return out
 

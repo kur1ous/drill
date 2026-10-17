@@ -39,6 +39,8 @@ drill review notes/
 
 The start screen shows the session's due and new card counts; press any key to begin.
 For each card: space shows the answer, then 1 again, 2 hard, 3 good, 4 easy.
+Review intervals always satisfy again <= hard < good < easy, with at least a day
+between hard, good and easy, including near the 36,500-day maximum.
 On the next question, press `u` before revealing the answer to undo the last grade
 and return to that card. Undo restores its schedule and removes that review.
 Cards graded again return once at the end for practice: space reveals the answer,

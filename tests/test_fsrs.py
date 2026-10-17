@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
 from drill import fsrs
 from drill.fsrs import Grade, Memory
-from drill.schedule import apply_grade, preview_intervals
+from drill.schedule import CardState, apply_grade, preview_intervals
 
 
 def test_retrievability_is_ninety_percent_at_one_stability():
@@ -141,3 +141,46 @@ def test_preview_intervals_for_new_card():
     assert preview_intervals(None, TODAY) == {
         Grade.AGAIN: 1, Grade.HARD: 1, Grade.GOOD: 4, Grade.EASY: 11,
     }
+
+
+def test_new_card_preview_matches_saved_schedule():
+    intervals = preview_intervals(None, TODAY)
+    for grade in Grade:
+        after = apply_grade(None, "abc", "bio", grade, TODAY)
+        assert (after.due - TODAY).days == intervals[grade]
+
+
+@pytest.mark.parametrize("stability", [0.01, 0.3, 1, 4, 30, 300, 36500, 1e9])
+@pytest.mark.parametrize("difficulty", [1, 5, 10])
+@pytest.mark.parametrize("elapsed", [-1, 0, 1, 30, 3650])
+def test_review_intervals_are_ordered_and_match_saved_schedule(stability, difficulty, elapsed):
+    state = CardState(
+        id="abc", deck="bio", stability=stability, difficulty=difficulty,
+        due=TODAY, last_review=TODAY - timedelta(days=elapsed),
+        introduced=TODAY - timedelta(days=3650), reps=20, lapses=2,
+    )
+    intervals = preview_intervals(state, TODAY)
+    again, hard, good, easy = (intervals[grade] for grade in Grade)
+    assert 1 <= again <= hard < good < easy <= fsrs.MAX_INTERVAL
+    for grade in Grade:
+        after = apply_grade(state, state.id, state.deck, grade, TODAY)
+        assert (after.due - TODAY).days == intervals[grade]
+        memory = fsrs.next_memory(Memory(stability, difficulty), grade, max(0, elapsed))
+        assert after.stability == memory.stability
+        assert after.difficulty == memory.difficulty
+        assert after.reps == 21
+        assert after.lapses == 2 + (grade == Grade.AGAIN)
+
+
+def test_same_day_review_separates_successful_grades():
+    state = apply_grade(None, "abc", "bio", Grade.GOOD, TODAY)
+    intervals = preview_intervals(state, TODAY)
+    assert [intervals[grade] for grade in (Grade.HARD, Grade.GOOD, Grade.EASY)] == [4, 5, 6]
+
+
+def test_interval_cap_leaves_room_for_successful_grades():
+    state = CardState("abc", "bio", 1e9, 5, TODAY, TODAY, TODAY)
+    intervals = preview_intervals(state, TODAY)
+    assert [intervals[grade] for grade in (Grade.HARD, Grade.GOOD, Grade.EASY)] == [
+        fsrs.MAX_INTERVAL - 2, fsrs.MAX_INTERVAL - 1, fsrs.MAX_INTERVAL,
+    ]
