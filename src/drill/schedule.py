@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from random import Random
 
 from drill import fsrs
 from drill.fsrs import Grade
@@ -46,7 +47,7 @@ def apply_grade(
         lapses = state.lapses + (grade == Grade.AGAIN)
         reps = state.reps + 1
         introduced = state.introduced
-    days = preview_intervals(state, today)[grade]
+    days = preview_intervals(state, today, card_id)[grade]
     return CardState(
         id=card_id,
         deck=deck,
@@ -60,9 +61,15 @@ def apply_grade(
     )
 
 
-def preview_intervals(state: CardState | None, today: date) -> dict[Grade, int]:
+def preview_intervals(state: CardState | None, today: date, card_id: str) -> dict[Grade, int]:
     """Days until next review for each possible grade, for the answer screen."""
     out = {grade: fsrs.interval(_next_memory(state, grade, today).stability) for grade in Grade}
+    # A local, string-seeded generator keeps previews and undo/regrade reproducible.
+    rng = Random(f"{card_id}:{state.reps + 1 if state else 1}")
+    for grade, days in out.items():
+        if days > 2:
+            spread = max(1, days // 20)
+            out[grade] = rng.randint(max(3, days - spread), min(fsrs.MAX_INTERVAL, days + spread))
     # Reserve room below the cap so hard, good and easy stay a day apart.
     out[Grade.HARD] = min(out[Grade.HARD], fsrs.MAX_INTERVAL - 2)
     out[Grade.GOOD] = min(max(out[Grade.GOOD], out[Grade.HARD] + 1), fsrs.MAX_INTERVAL - 1)

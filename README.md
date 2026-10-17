@@ -41,6 +41,9 @@ The start screen shows the session's due and new card counts; press any key to b
 For each card: space shows the answer, then 1 again, 2 hard, 3 good, 4 easy.
 Review intervals always satisfy again <= hard < good < easy, with at least a day
 between hard, good and easy, including near the 36,500-day maximum.
+Intervals over two days get a small adjustment before grade ordering to spread reviews out.
+The variation is seeded by card ID and review count; displayed intervals match
+the saved schedule, including after undoing and repeating a grade.
 On the next question, press `u` before revealing the answer to undo the last grade
 and return to that card. Undo restores its schedule and removes that review.
 Cards graded again return once at the end for practice: space reveals the answer,

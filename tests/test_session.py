@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, timedelta
 import re
 
@@ -6,7 +7,7 @@ import pytest
 from drill.cli import main
 from drill.deck import load_deck
 from drill.fsrs import Grade
-from drill.schedule import apply_grade
+from drill.schedule import apply_grade, preview_intervals
 from drill.session import build_queue, render_answer, run_review
 from drill.store import Store
 from drill.term import EOF_KEY, Terminal
@@ -37,9 +38,9 @@ def make_deck(tmp_path, n=2):
 def test_queue_puts_due_first_then_limited_new(tmp_path):
     make_deck(tmp_path, 4)
     cards = load_deck(tmp_path)
-    older = apply_grade(None, cards[2].id, "deck", Grade.GOOD, TODAY - timedelta(days=9))
+    older = apply_grade(None, cards[2].id, "deck", Grade.GOOD, TODAY - timedelta(days=12))
     old = apply_grade(None, cards[1].id, "deck", Grade.GOOD, TODAY - timedelta(days=8))
-    later = apply_grade(None, cards[3].id, "deck", Grade.GOOD, TODAY)  # due in 4 days
+    later = apply_grade(None, cards[3].id, "deck", Grade.GOOD, TODAY)  # due in the future
     states = {s.id: s for s in (older, old, later)}
     queue = build_queue(cards, states, TODAY, new_limit=5)
     assert [c.question for c in queue] == ["Question 3", "Question 2", "Question 1"]
@@ -56,7 +57,9 @@ def test_review_records_each_grade(tmp_path):
     with Store(tmp_path / ".drill.db") as store:
         states = store.states()
         assert len(states) == 2
-        assert sorted((s.due - TODAY).days for s in states.values()) == [4, 11]
+        good_days, easy_days = sorted((s.due - TODAY).days for s in states.values())
+        assert 3 <= good_days <= 5
+        assert 10 <= easy_days <= 12
         assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 2
 
 
@@ -65,7 +68,12 @@ def test_answer_screen_offers_previews_and_keys(tmp_path):
     term = Fake("b 3")
     run_review(tmp_path, None, 10, term, TODAY)
     assert "Question 1" in term.text and "Answer 1" in term.text
-    assert "1 again 1d   2 hard 1d   3 good 4d   4 easy 11d" in term.text
+    card = load_deck(tmp_path)[0]
+    intervals = preview_intervals(None, TODAY, card.id)
+    for grade in Grade:
+        assert f"{int(grade)} {grade.name.lower()} {intervals[grade]}d" in term.text
+    with Store(tmp_path / ".drill.db") as store:
+        assert (store.get(card.id).due - TODAY).days == intervals[Grade.GOOD]
 
 
 def test_review_displays_question_with_attached_hash(tmp_path):
@@ -133,6 +141,7 @@ def test_again_cards_return_once_after_the_scheduled_queue(tmp_path, existing):
             for card in cards:
                 state = apply_grade(None, card.id, card.deck, Grade.GOOD,
                                     TODAY - timedelta(days=9))
+                state = replace(state, due=TODAY)
                 store.record(None, state, Grade.GOOD)
                 previous[card.id] = state
     term = Fake("b 1 3 1    ")
@@ -242,7 +251,7 @@ def test_session_limit_keeps_due_first_and_counts_selected_cards(
     make_deck(tmp_path, 5)
     cards = load_deck(tmp_path)
     with Store(tmp_path / ".drill.db") as store:
-        for card, day in [(cards[2], TODAY - timedelta(days=9)),
+        for card, day in [(cards[2], TODAY - timedelta(days=12)),
                           (cards[1], TODAY - timedelta(days=8)),
                           (cards[4], TODAY)]:
             state = apply_grade(None, card.id, card.deck, Grade.GOOD, day)
@@ -289,7 +298,7 @@ def test_second_session_same_day_has_nothing_due(tmp_path):
     term = Fake("")
     assert run_review(tmp_path, None, 10, term, TODAY) == 0
     assert "Nothing due." in term.text
-    assert "Next: 2 cards on 2026-03-05." in term.text
+    assert "Next: 1 card on 2026-03-04." in term.text
 
 
 def test_new_card_limit_applies_per_day(tmp_path):

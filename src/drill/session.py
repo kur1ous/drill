@@ -211,7 +211,7 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
                 last_grade = None
                 position += 1
                 continue
-            days = preview_intervals(state, today)
+            days = preview_intervals(state, today, card.id)
             labels = [
                 f"{term.accent(str(int(g)))} {g.name.lower()} {term.dim(_days(days[g]))}"
                 for g in Grade

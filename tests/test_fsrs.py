@@ -1,4 +1,6 @@
+from dataclasses import replace
 from datetime import date, timedelta
+import random
 
 import pytest
 
@@ -108,9 +110,9 @@ def test_harder_cards_gain_less():
 TODAY = date(2026, 3, 1)
 
 
-def test_first_good_review_schedules_four_days_out():
+def test_first_good_review_schedules_within_fuzz_range():
     s = apply_grade(None, "abc", "bio", Grade.GOOD, TODAY)
-    assert (s.due - TODAY).days == 4
+    assert 3 <= (s.due - TODAY).days <= 5
     assert s.reps == 1 and s.lapses == 0
     assert s.introduced == TODAY and s.last_review == TODAY
 
@@ -119,7 +121,7 @@ def test_second_review_uses_elapsed_calendar_days():
     first = apply_grade(None, "abc", "bio", Grade.GOOD, TODAY)
     second = apply_grade(first, "abc", "bio", Grade.GOOD, date(2026, 3, 5))
     assert second.stability == pytest.approx(14.736, abs=5e-3)
-    assert (second.due - date(2026, 3, 5)).days == 15
+    assert 14 <= (second.due - date(2026, 3, 5)).days <= 16
     assert second.reps == 2
     assert second.introduced == TODAY
 
@@ -138,13 +140,14 @@ def test_again_counts_a_lapse_only_after_the_first_review():
 
 
 def test_preview_intervals_for_new_card():
-    assert preview_intervals(None, TODAY) == {
-        Grade.AGAIN: 1, Grade.HARD: 1, Grade.GOOD: 4, Grade.EASY: 11,
-    }
+    intervals = preview_intervals(None, TODAY, "abc")
+    assert intervals[Grade.AGAIN] == intervals[Grade.HARD] == 1
+    assert 3 <= intervals[Grade.GOOD] <= 5
+    assert 10 <= intervals[Grade.EASY] <= 12
 
 
 def test_new_card_preview_matches_saved_schedule():
-    intervals = preview_intervals(None, TODAY)
+    intervals = preview_intervals(None, TODAY, "abc")
     for grade in Grade:
         after = apply_grade(None, "abc", "bio", grade, TODAY)
         assert (after.due - TODAY).days == intervals[grade]
@@ -159,7 +162,7 @@ def test_review_intervals_are_ordered_and_match_saved_schedule(stability, diffic
         due=TODAY, last_review=TODAY - timedelta(days=elapsed),
         introduced=TODAY - timedelta(days=3650), reps=20, lapses=2,
     )
-    intervals = preview_intervals(state, TODAY)
+    intervals = preview_intervals(state, TODAY, state.id)
     again, hard, good, easy = (intervals[grade] for grade in Grade)
     assert 1 <= again <= hard < good < easy <= fsrs.MAX_INTERVAL
     for grade in Grade:
@@ -174,13 +177,49 @@ def test_review_intervals_are_ordered_and_match_saved_schedule(stability, diffic
 
 def test_same_day_review_separates_successful_grades():
     state = apply_grade(None, "abc", "bio", Grade.GOOD, TODAY)
-    intervals = preview_intervals(state, TODAY)
-    assert [intervals[grade] for grade in (Grade.HARD, Grade.GOOD, Grade.EASY)] == [4, 5, 6]
+    intervals = preview_intervals(state, TODAY, state.id)
+    hard, good, easy = (intervals[grade] for grade in (Grade.HARD, Grade.GOOD, Grade.EASY))
+    assert hard < good < easy
 
 
 def test_interval_cap_leaves_room_for_successful_grades():
     state = CardState("abc", "bio", 1e9, 5, TODAY, TODAY, TODAY)
-    intervals = preview_intervals(state, TODAY)
-    assert [intervals[grade] for grade in (Grade.HARD, Grade.GOOD, Grade.EASY)] == [
-        fsrs.MAX_INTERVAL - 2, fsrs.MAX_INTERVAL - 1, fsrs.MAX_INTERVAL,
-    ]
+    intervals = preview_intervals(state, TODAY, state.id)
+    hard, good, easy = (intervals[grade] for grade in (Grade.HARD, Grade.GOOD, Grade.EASY))
+    assert fsrs.MAX_INTERVAL * 0.95 <= hard < good < easy <= fsrs.MAX_INTERVAL
+
+
+@pytest.mark.parametrize("days", [1, 2, 3, 20, 100, fsrs.MAX_INTERVAL])
+def test_fuzz_bounds_and_short_intervals(monkeypatch, days):
+    monkeypatch.setattr(fsrs, "interval", lambda stability: days)
+    for i in range(50):
+        intervals = preview_intervals(None, TODAY, str(i))
+        again, hard, good, easy = (intervals[grade] for grade in Grade)
+        assert 1 <= again <= hard < good < easy <= fsrs.MAX_INTERVAL
+        if days <= 2:
+            assert again == hard == days
+        else:
+            spread = max(1, days // 20)
+            assert max(3, days - spread) <= again <= min(fsrs.MAX_INTERVAL, days + spread)
+
+
+def test_fuzz_is_repeatable_and_does_not_touch_global_random_state():
+    before = random.getstate()
+    expected = preview_intervals(None, TODAY, "repeatable")
+    for i in range(20):
+        preview_intervals(None, TODAY, str(i))
+        assert preview_intervals(None, TODAY, "repeatable") == expected
+    assert random.getstate() == before
+
+
+def test_fuzz_spreads_identical_cards_and_changes_with_review_count():
+    state = CardState("abc", "bio", 100, 5, TODAY, TODAY, TODAY)
+    by_id = set()
+    by_reps = set()
+    for i in range(50):
+        by_id.add(preview_intervals(state, TODAY, str(i))[Grade.GOOD])
+        by_reps.add(preview_intervals(replace(state, reps=i), TODAY, state.id)[Grade.GOOD])
+    assert len(by_id) > 3
+    assert len(by_reps) > 3
+    new_dates = {apply_grade(None, str(i), "bio", Grade.GOOD, TODAY).due for i in range(50)}
+    assert len(new_dates) == 3
