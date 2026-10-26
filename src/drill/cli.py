@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         return int(bool(issues))
     if args.command == "review":
         from drill.session import run_review
+        from drill.store import UnsupportedSchemaError
         from drill.term import system_terminal
 
         if args.limit is not None and args.limit <= 0:
@@ -68,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.dir, db_path, max(0, args.new), system_terminal(), date.today(),
                 limit=args.limit,
             )
-        except DeckReadError as exc:
+        except (DeckReadError, UnsupportedSchemaError) as exc:
             print(f"drill: {exc}", file=sys.stderr)
         except sqlite3.Error as exc:
             print(f"drill: cannot use database {db_path}: {exc}", file=sys.stderr)

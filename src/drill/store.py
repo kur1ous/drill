@@ -15,6 +15,11 @@ from drill.schedule import CardState
 
 SCHEMA_VERSION = 1
 
+
+class UnsupportedSchemaError(RuntimeError):
+    pass
+
+
 _SCHEMA = """
 CREATE TABLE cards (
     id          TEXT PRIMARY KEY,
@@ -53,7 +58,7 @@ class Store:
                     self.db.executescript(_SCHEMA)
                     self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             elif version != SCHEMA_VERSION:
-                raise RuntimeError(
+                raise UnsupportedSchemaError(
                     f"{self.path} has schema version {version}, this drill expects {SCHEMA_VERSION}"
                 )
         except Exception:

@@ -151,3 +151,23 @@ def test_locked_database_reports_file(deck_file, monkeypatch, capsys, lock):
     with Store(path) as store:
         assert store.states() == {}
         assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("custom_db", [False, True])
+def test_unsupported_database_version_reports_file(deck_file, capsys, custom_db):
+    path = deck_file.parent / ("history.sqlite" if custom_db else ".drill.db")
+    with Store(path) as store:
+        store.db.execute("PRAGMA user_version = 99")
+    original = path.read_bytes()
+    args = ["review", str(deck_file.parent)]
+    if custom_db:
+        args += ["--db", str(path)]
+
+    assert main(args) == 2
+
+    error = capsys.readouterr().err
+    assert str(path) in error
+    assert "schema version 99" in error
+    assert "expects 1" in error
+    assert "Traceback" not in error
+    assert path.read_bytes() == original
