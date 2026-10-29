@@ -216,6 +216,63 @@ def test_closed_stdin_stops_cleanly(tmp_path):
     assert "Stopped. 0 cards reviewed." in term.text
 
 
+def seed_lapses(tmp_path, lapses):
+    make_deck(tmp_path, len(lapses))
+    cards = load_deck(tmp_path)
+    with Store(tmp_path / ".drill.db") as store:
+        for card, count in zip(cards, lapses):
+            state = apply_grade(None, card.id, card.deck, Grade.GOOD,
+                                TODAY - timedelta(days=9))
+            store.record(None, replace(state, due=TODAY, lapses=count), Grade.GOOD)
+    return cards
+
+
+@pytest.mark.parametrize("lapses", [7, 8, 9])
+@pytest.mark.parametrize("width", [30, 120])
+def test_leech_note_starts_at_eight_lapses_on_answer_and_summary(tmp_path, lapses, width):
+    seed_lapses(tmp_path, [lapses])
+    term = Fake("b 3", width=width)
+    screens = []
+    term.clear = lambda: screens.append([])
+    term.write = lambda text: screens[-1].append(text)
+    run_review(tmp_path, None, 10, term, TODAY)
+    start, front, back, summary = ["".join(chunks) for chunks in screens]
+    assert "Leech" not in start + front
+    assert (f"Leech: {lapses} lapses" in back) == (lapses >= 8)
+    assert ("1 leech reviewed" in summary) == (lapses >= 8)
+    assert all(len(line) <= width for chunks in screens for line in "".join(chunks).splitlines())
+
+
+def test_eighth_lapse_shows_in_practice_and_counts_once_in_summary(tmp_path):
+    cards = seed_lapses(tmp_path, [7, 8])
+    term = Fake("b 1 3  ")
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert term.text.count("Leech: 8 lapses") == 2
+    assert "2 leeches reviewed (8+ lapses)" in term.text
+    assert "Done. 2 cards reviewed." in term.text
+    with Store(tmp_path / ".drill.db") as store:
+        assert [store.get(c.id).lapses for c in cards] == [8, 8]
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 4
+
+
+@pytest.mark.parametrize("ending", ["q", "u 3", "uq"])
+def test_leech_summary_respects_undo_and_stopping_before_practice(tmp_path, ending):
+    card = seed_lapses(tmp_path, [7])[0]
+    term = Fake("b 1" + ending)
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert ("1 leech reviewed" in term.text) == (ending == "q")
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.get(card.id).lapses == (8 if ending == "q" else 7)
+
+
+@pytest.mark.parametrize("keys, limit", [("q", None), ("b q", None), ("b 3q", None), ("b 3", 1)])
+def test_summary_excludes_ungraded_leeches(tmp_path, keys, limit):
+    seed_lapses(tmp_path, [0, 8])
+    term = Fake(keys)
+    run_review(tmp_path, None, 10, term, TODAY, limit=limit)
+    assert "leech" not in term.text.lower()
+
+
 @pytest.mark.parametrize("key", ["q", "\x03", ""])
 def test_quitting_start_screen_leaves_history_untouched(tmp_path, key):
     make_deck(tmp_path)

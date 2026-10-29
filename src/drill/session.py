@@ -15,6 +15,7 @@ from drill.store import Store
 from drill.term import EOF_KEY, Terminal
 
 MARGIN = "    "
+_LEECH_LAPSES = 8
 _LIST = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
 _CODE = re.compile(r"`([^`]+)`")
@@ -201,6 +202,9 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
             term.write("\n")
             for line in render_answer(term, card.answer):
                 term.write(line + "\n")
+            if state is not None and state.lapses >= _LEECH_LAPSES:
+                term.write("\n")
+                _write_text(term, f"Leech: {state.lapses} lapses; consider rewriting this card.", dim=True)
             if practice:
                 term.write("\n")
                 _write_text(term, "Practice only - schedule unchanged", dim=True)
@@ -283,7 +287,14 @@ def run_review(
         if summary.counts:
             parts = [f"{summary.counts[g]} {g.name.lower()}" for g in Grade if g in summary.counts]
             _write_text(term, ", ".join(parts), dim=True)
-        upcoming = next_due(store.states(), live, today)
+        states = store.states()
+        # Retained grades cover the queue prefix; practice repeats add no grades.
+        leeches = {c.id for c in queue[:summary.reviewed]
+                   if c.id in states and states[c.id].lapses >= _LEECH_LAPSES}
+        if leeches:
+            label = "leech" if len(leeches) == 1 else "leeches"
+            _write_text(term, f"{len(leeches)} {label} reviewed (8+ lapses); consider rewriting.", dim=True)
+        upcoming = next_due(states, live, today)
         if upcoming:
             term.write("\n")
             _write_text(term, _next_line(upcoming))

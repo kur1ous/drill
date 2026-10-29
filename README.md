@@ -48,6 +48,9 @@ On the next question, press `u` before revealing the answer to undo the last gra
 and return to that card. Undo restores its schedule and removes that review.
 Cards graded again return once at the end for practice: space reveals the answer,
 then space continues. Practice does not change schedules, history or review counts.
+Cards with eight or more lapses show a leech note on the answer screen, suggesting
+a rewrite. The summary counts leeches reviewed in this session, including cards
+that reach eight lapses during it; practice repeats and undone grades do not count.
 `q` stops; grades already given are kept. Up to 10 new cards are introduced per
 day (`--new N` to change it). Use `--limit N` with a positive integer to cap the
 distinct cards in a session, due cards first; practice repeats are extra.
