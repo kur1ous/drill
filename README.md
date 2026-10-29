@@ -34,8 +34,13 @@ Deck files must be UTF-8 text.
 
 ```
 pip install -e .          # or: pipx install .
+drill init notes/
 drill review notes/
 ```
+
+`drill init DIR` creates the folder (including missing parents) and a two-card
+`example.md`, then prints three lines explaining the format. Existing files stay
+untouched; if `example.md` already exists, init reports an error and exits with code 2.
 
 The start screen shows the session's due and new card counts; press any key to begin.
 For each card: space shows the answer, then 1 again, 2 hard, 3 good, 4 easy.

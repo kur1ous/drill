@@ -5,6 +5,7 @@ import pytest
 
 from drill import __version__
 from drill.cli import main
+from drill.deck import check_deck, load_deck
 from drill.store import Store
 from drill.term import EOF_KEY, Terminal
 
@@ -19,6 +20,70 @@ def test_version(capsys):
 def test_no_command_prints_help(capsys):
     assert main([]) == 2
     assert "usage: drill" in capsys.readouterr().err
+
+
+def test_init_creates_valid_example_deck(tmp_path, capsys):
+    directory = tmp_path / "nested" / "notes"
+    assert main(["init", str(directory)]) == 0
+    cards = load_deck(directory)
+    assert len(cards) == 2
+    assert all(card.question and card.answer for card in cards)
+    assert check_deck(directory) == []
+    assert list(directory.iterdir()) == [directory / "example.md"]
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert len(captured.out.splitlines()) == 3
+    assert str(directory / "example.md") in captured.out
+    assert "## heading is a question" in captured.out
+    assert "answer" in captured.out
+    assert "UTF-8 .md" in captured.out
+
+
+def test_init_preserves_existing_files(tmp_path):
+    existing = {"notes.md": b"## My question\nMy answer\n", ".drill.db": b"history"}
+    for name, content in existing.items():
+        (tmp_path / name).write_bytes(content)
+    assert main(["init", str(tmp_path)]) == 0
+    for name, content in existing.items():
+        assert (tmp_path / name).read_bytes() == content
+
+
+def test_init_refuses_to_replace_example(tmp_path, capsys):
+    example = tmp_path / "example.md"
+    example.write_bytes(b"my own deck")
+    assert main(["init", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert str(example) in captured.err
+    assert example.read_bytes() == b"my own deck"
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_init_reports_file_in_directory_path(tmp_path, capsys, nested):
+    existing = tmp_path / "notes"
+    existing.write_bytes(b"keep me")
+    directory = existing / "child" if nested else existing
+    assert main(["init", str(directory)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert str(existing) in captured.err
+    assert "Traceback" not in captured.err
+    assert existing.read_bytes() == b"keep me"
+
+
+@pytest.mark.parametrize("operation", ["mkdir", "open"])
+def test_init_reports_permission_errors(tmp_path, capsys, monkeypatch, operation):
+    def denied(path, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(Path, operation, denied)
+    assert main(["init", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert str(tmp_path) in captured.err
+    assert "Permission denied" in captured.err
+    assert "Traceback" not in captured.err
+    assert not (tmp_path / "example.md").exists()
 
 
 @pytest.mark.parametrize("limit", ["0", "-1", "1.5", "many"])

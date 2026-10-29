@@ -16,6 +16,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"drill {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
+    init = sub.add_parser("init", help="create a folder with an example deck")
+    init.add_argument("dir", type=Path, help="folder for markdown decks")
+
     check = sub.add_parser("check", help="check decks for empty cards and duplicates")
     check.add_argument("dir", type=Path, help="folder of markdown decks")
 
@@ -39,6 +42,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help(sys.stderr)
         return 2
+    if args.command == "init":
+        example = args.dir / "example.md"
+        try:
+            args.dir.mkdir(parents=True, exist_ok=True)
+            with example.open("x", encoding="utf-8") as deck:
+                deck.write(
+                    "# Example deck\n\n"
+                    "## What is the derivative of x^2?\n\n"
+                    "2x.\n\n"
+                    "## When is a square matrix invertible?\n\n"
+                    "When its determinant is nonzero.\n"
+                )
+        except OSError as exc:
+            print(
+                f"drill: cannot create {exc.filename or args.dir}: {exc.strerror or exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"Created {example}: each ## heading is a question.")
+        print("The text below it is the answer, ending at the next ## or # heading.")
+        print("Save decks as UTF-8 .md files; # titles and text before cards are ignored.")
+        return 0
     if args.command == "check":
         if not args.dir.is_dir():
             print(f"drill: not a directory: {args.dir}", file=sys.stderr)
