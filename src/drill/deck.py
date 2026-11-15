@@ -101,6 +101,8 @@ def _read_decks(root: Path | str) -> Iterator[tuple[Path, str]]:
         if any(part.startswith(".") for part in rel.parts):
             continue
         try:
+            if path.is_dir():
+                continue
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError as exc:
             raise DeckReadError(f"cannot read deck {path}: expected UTF-8 text") from exc

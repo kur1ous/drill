@@ -123,6 +123,29 @@ def deck_file(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("command", ["review", "check"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_markdown_directory_is_not_read_as_a_deck(deck_file, capsys, command, nested):
+    root = deck_file.parent
+    directory = root / "chapter.md"
+    directory.mkdir()
+    if nested:
+        deck_file.rename(directory / deck_file.name)
+
+    assert main([command, str(root)]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    if command == "check":
+        assert captured.out == "No issues found.\n"
+        assert not (root / ".drill.db").exists()
+    else:
+        with Store(root / ".drill.db") as store:
+            states = list(store.states().values())
+        assert len(states) == 1
+        assert states[0].deck == ("chapter.md/notes" if nested else "notes")
+
+
+@pytest.mark.parametrize("command", ["review", "check"])
 def test_non_utf8_deck_reports_file(deck_file, capsys, command):
     deck_file.write_bytes(b"## Question\n\xff\n")
     assert main([command, str(deck_file.parent)]) == 2
