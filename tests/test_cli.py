@@ -122,6 +122,96 @@ def deck_file(tmp_path, monkeypatch):
     return path
 
 
+@pytest.mark.parametrize("selection, expected", [
+    (["--only", "unit/*"], ["unit/biology", "unit/deep/chemistry"]),
+    (["--only", "unit/b?ology"], ["unit/biology"]),
+    (["--only", "[ab]lgebra"], ["algebra"]),
+    (["--only", "*"], ["algebra", "unit/biology", "unit/deep/chemistry"]),
+])
+def test_review_only_selects_deck_names(tmp_path, monkeypatch, selection, expected):
+    for name in ["algebra", "unit/biology", "unit/deep/chemistry"]:
+        path = tmp_path / f"{name}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"## {name}\nAnswer\n", encoding="utf-8")
+    keys = iter("b" + " 3" * 3)
+    monkeypatch.setattr(
+        "drill.term.system_terminal",
+        lambda: Terminal(lambda text: None, lambda: next(keys, EOF_KEY)),
+    )
+    assert main(["review", str(tmp_path), *selection]) == 0
+    with Store(tmp_path / ".drill.db") as store:
+        assert sorted(s.deck for s in store.states().values()) == expected
+
+
+@pytest.mark.parametrize("file_input", [False, True])
+@pytest.mark.parametrize("custom_db", [False, True])
+def test_selected_duplicate_keeps_folder_identity(deck_file, file_input, custom_db):
+    root = deck_file.parent
+    (root / "a.md").write_text("## Question\nOther answer\n", encoding="utf-8")
+    selected = next(c for c in load_deck(root) if c.deck == "notes")
+    args = ["review", str(deck_file if file_input else root)]
+    if not file_input:
+        args += ["--only", "notes"]
+    database = root / ("custom.sqlite" if custom_db else ".drill.db")
+    if custom_db:
+        args += ["--db", str(database)]
+    assert main(args) == 0
+    with Store(database) as store:
+        assert list(store.states()) == [selected.id]
+        assert store.get(selected.id).deck == "notes"
+    if custom_db:
+        assert not (root / ".drill.db").exists()
+
+
+@pytest.mark.parametrize("file_input", [False, True])
+@pytest.mark.parametrize("pattern", ["missing*", "NOTES", "notes.md"])
+def test_review_no_matching_decks_does_not_open_database(
+    deck_file, monkeypatch, file_input, pattern,
+):
+    output = []
+    monkeypatch.setattr(
+        "drill.term.system_terminal",
+        lambda: Terminal(output.append, lambda: pytest.fail("unexpected input"), ansi=False),
+    )
+    target = deck_file if file_input else deck_file.parent
+    assert main(["review", str(target), "--only", pattern]) == 1
+    assert "No cards found matching" in "".join(output)
+    assert not (deck_file.parent / ".drill.db").exists()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_review_rejects_missing_or_non_markdown_file(tmp_path, capsys, existing):
+    path = tmp_path / ("notes.txt" if existing else "missing.md")
+    if existing:
+        path.write_text("## Q\nAnswer\n", encoding="utf-8")
+    assert main(["review", str(path)]) == 2
+    assert str(path) in capsys.readouterr().err
+    assert not (tmp_path / ".drill.db").exists()
+
+
+def test_file_review_reports_decode_error(deck_file, capsys):
+    deck_file.write_bytes(b"\xff")
+    assert main(["review", str(deck_file)]) == 2
+    error = capsys.readouterr().err
+    assert str(deck_file) in error and "UTF-8" in error
+    assert not (deck_file.parent / ".drill.db").exists()
+
+
+def test_filtered_review_shares_daily_new_allowance(deck_file, monkeypatch):
+    root = deck_file.parent
+    assert main(["review", str(deck_file), "--new", "1"]) == 0
+    (root / "other.md").write_text("## Other\nAnswer\n", encoding="utf-8")
+    output = []
+    monkeypatch.setattr(
+        "drill.term.system_terminal",
+        lambda: Terminal(output.append, lambda: pytest.fail("unexpected input"), ansi=False),
+    )
+    assert main(["review", str(root), "--only", "other", "--new", "1"]) == 0
+    assert "Nothing due." in "".join(output)
+    with Store(root / ".drill.db") as store:
+        assert len(store.states()) == 1
+
+
 @pytest.mark.parametrize("command", ["review", "check"])
 @pytest.mark.parametrize("nested", [False, True])
 def test_markdown_directory_is_not_read_as_a_deck(deck_file, capsys, command, nested):

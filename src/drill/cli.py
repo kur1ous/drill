@@ -23,7 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("dir", type=Path, help="folder of markdown decks")
 
     review = sub.add_parser("review", help="review the cards that are due")
-    review.add_argument("dir", type=Path, help="folder of markdown decks")
+    review.add_argument("dir", type=Path, help="folder of markdown decks or a .md file")
+    review.add_argument(
+        "--only", metavar="PATTERN", help="case-sensitive glob on deck names without .md"
+    )
     review.add_argument(
         "--new", type=int, default=10, metavar="N", help="new cards per day (default 10)"
     )
@@ -31,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, metavar="N", help="maximum cards per session (positive integer)"
     )
     review.add_argument(
-        "--db", type=Path, metavar="FILE", help="state file (default: DIR/.drill.db)"
+        "--db", type=Path, metavar="FILE", help="state file (default: deck folder/.drill.db)"
     )
     return parser
 
@@ -85,14 +88,16 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.limit is not None and args.limit <= 0:
             parser.error("--limit must be a positive integer")
-        if not args.dir.is_dir():
-            print(f"drill: not a directory: {args.dir}", file=sys.stderr)
+        is_file = args.dir.is_file() and args.dir.suffix == ".md"
+        if not args.dir.is_dir() and not is_file:
+            print(f"drill: not a directory or .md file: {args.dir}", file=sys.stderr)
             return 2
-        db_path = args.db or args.dir / ".drill.db"
+        folder = args.dir.parent if is_file else args.dir
+        db_path = args.db or folder / ".drill.db"
         try:
             return run_review(
                 args.dir, db_path, max(0, args.new), system_terminal(), date.today(),
-                limit=args.limit,
+                limit=args.limit, only=args.only,
             )
         except (DeckReadError, UnsupportedSchemaError) as exc:
             print(f"drill: {exc}", file=sys.stderr)

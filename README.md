@@ -66,6 +66,16 @@ controls and long code lines; below 40 columns the side margins disappear.
 
 Without installing: `PYTHONPATH=src python -m drill review notes/`.
 
+Review one file with `drill review notes/biology.md`, or select decks with
+`drill review notes/ --only 'unit1/*'`. Patterns are case-sensitive and match
+paths relative to the deck folder, using `/` and omitting `.md`; `*` also matches
+across folders. Quote patterns so the shell leaves them intact. A file uses its
+parent as the deck folder and shares that folder's `.drill.db`; `--db` overrides
+this. The whole folder is read before filtering so duplicate questions keep
+their IDs. For nested files in a larger collection, use that collection's folder
+with `--only` to keep the same deck names and history. No matching cards exits
+with code 1. The daily new-card allowance remains shared across the database.
+
 Run `drill check notes/` to report files with no cards, `##` headings with empty
 bodies, and exact duplicate questions within or across files. Locations are
 `file:line`, relative to the deck folder; duplicates also name the first occurrence.

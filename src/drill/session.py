@@ -6,6 +6,7 @@ import re
 import textwrap
 from dataclasses import dataclass, field
 from datetime import date
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from drill.deck import Card, load_deck
@@ -257,16 +258,23 @@ def _next_line(upcoming: tuple[date, int] | None) -> str:
 
 def run_review(
     root: Path, db_path: Path | None, new_limit: int, term: Terminal, today: date,
-    *, limit: int | None = None,
+    *, limit: int | None = None, only: str | None = None,
 ) -> int:
-    cards = load_deck(root)
+    folder = root.parent if root.is_file() else root
+    # Assign duplicate ids across the whole folder before selecting a subset.
+    cards = load_deck(folder)
+    if folder != root:
+        cards = [c for c in cards if c.deck == root.stem]
+    if only is not None:
+        cards = [c for c in cards if fnmatchcase(c.deck, only)]
     if not cards:
         term.refresh_width()
-        _write_text(term, f"No cards found under {root}.")
+        selection = f" matching {only!r}" if only is not None else ""
+        _write_text(term, f"No cards found{selection} in {root}.")
         _write_text(term, "A card is a '## question' heading followed by its answer.")
         return 1
     live = {c.id for c in cards}
-    with Store(db_path or Path(root) / ".drill.db") as store:
+    with Store(db_path or folder / ".drill.db") as store:
         states = store.states()
         queue = build_queue(cards, states, today, new_limit, store.new_introduced_on(today))
         if limit is not None:
