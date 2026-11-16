@@ -1,4 +1,6 @@
 import sqlite3
+from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -6,6 +8,8 @@ import pytest
 from drill import __version__
 from drill.cli import main
 from drill.deck import check_deck, load_deck
+from drill.fsrs import Grade
+from drill.schedule import apply_grade
 from drill.store import Store
 from drill.term import EOF_KEY, Terminal
 
@@ -108,6 +112,42 @@ def test_review_cli_caps_session(tmp_path, monkeypatch):
     assert "Done. 1 card reviewed." in "".join(output)
     with Store(tmp_path / ".drill.db") as store:
         assert len(store.states()) == 1
+
+
+@pytest.mark.parametrize("order, first", [
+    (None, "Three"), ("due", "Three"), ("random", "Two"), ("deck", "One"),
+])
+def test_review_cli_orders_before_session_limit(tmp_path, monkeypatch, order, first):
+    (tmp_path / "notes.md").write_text("## One\nA\n## Two\nB\n## Three\nC\n", encoding="utf-8")
+    cards = load_deck(tmp_path)
+    today = date.today()
+    with Store(tmp_path / ".drill.db") as store:
+        for i, days in ((0, 0), (2, -1)):
+            state = apply_grade(None, cards[i].id, cards[i].deck, Grade.GOOD, today)
+            store.record(None, replace(state, due=today + timedelta(days=days)), Grade.GOOD)
+    keys = iter("bq")
+    output = []
+    monkeypatch.setattr(
+        "drill.term.system_terminal",
+        lambda: Terminal(output.append, lambda: next(keys, EOF_KEY), ansi=False),
+    )
+    monkeypatch.setattr("drill.session.random.shuffle", lambda queue: queue.reverse())
+    args = ["review", str(tmp_path), "--limit", "1"]
+    if order is not None:
+        args += ["--order", order]
+    assert main(args) == 0
+    text = "".join(output)
+    assert f"    {first}\n" in text
+    for other in {"One", "Two", "Three"} - {first}:
+        assert f"    {other}\n" not in text
+
+
+def test_review_rejects_unknown_order(tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["review", str(tmp_path), "--order", "unknown"])
+    assert exc.value.code == 2
+    assert "--order" in capsys.readouterr().err
+    assert not (tmp_path / ".drill.db").exists()
 
 
 @pytest.fixture

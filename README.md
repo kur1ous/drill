@@ -58,8 +58,13 @@ a rewrite. The summary counts leeches reviewed in this session, including cards
 that reach eight lapses during it; practice repeats and undone grades do not count.
 `q` stops; grades already given are kept. Up to 10 new cards are introduced per
 day (`--new N` to change it). Use `--limit N` with a positive integer to cap the
-distinct cards in a session, due cards first; practice repeats are extra.
+distinct cards in a session; practice repeats are extra.
 Omit it to review the full queue.
+The default `--order due` shows oldest due cards first, then new cards in file order.
+Use `--order random` to shuffle the queue, or `--order deck` for deck-name order
+with cards in source-line order within each deck. These orders can mix due and
+new cards. The daily allowance selects new cards in file order before ordering;
+`--limit` then takes the first N cards from the ordered queue.
 Set `NO_COLOR=1` to turn colour off.
 Each screen adapts to the current terminal width. Narrow windows wrap the
 controls and long code lines; below 40 columns the side margins disappear.

@@ -48,6 +48,44 @@ def test_queue_puts_due_first_then_limited_new(tmp_path):
     assert build_queue(cards, {}, TODAY, new_limit=2, new_today=5) == []
 
 
+@pytest.mark.parametrize("order, expected", [
+    ("due", [3, 1, 0, 2]),
+    ("random", [2, 0, 1, 3]),
+    ("deck", [0, 1, 2, 3]),
+])
+def test_queue_orders_only_eligible_cards(tmp_path, monkeypatch, order, expected):
+    for name in ("alpha", "beta"):
+        (tmp_path / f"{name}.md").write_text(
+            "".join(f"## {name} {i}\nAnswer\n" for i in range(3)), encoding="utf-8"
+        )
+    cards = load_deck(tmp_path)
+    original = list(cards)
+    states = {}
+    for i, days in ((0, 0), (1, -1), (3, -2), (4, 1)):
+        state = apply_grade(None, cards[i].id, cards[i].deck, Grade.GOOD, TODAY)
+        states[state.id] = replace(state, due=TODAY + timedelta(days=days))
+
+    shuffled = []
+
+    def reverse(queue):
+        shuffled.append(list(queue))
+        queue.reverse()
+
+    monkeypatch.setattr("drill.session.random.shuffle", reverse)
+    queue = build_queue(cards, states, TODAY, new_limit=2, new_today=1, order=order)
+    assert queue == [cards[i] for i in expected]
+    assert cards == original
+    assert shuffled == ([[cards[i] for i in (3, 1, 0, 2)]] if order == "random" else [])
+    assert build_queue([], states, TODAY, new_limit=2, order=order) == []
+    exhausted = build_queue(cards, states, TODAY, new_limit=1, new_today=2, order=order)
+    assert {card.id for card in exhausted} == {cards[i].id for i in (0, 1, 3)}
+
+
+def test_queue_rejects_unknown_order():
+    with pytest.raises(ValueError, match="unknown review order"):
+        build_queue([], {}, TODAY, new_limit=1, order="unknown")
+
+
 def test_review_records_each_grade(tmp_path):
     make_deck(tmp_path)
     term = Fake("b 3 4")

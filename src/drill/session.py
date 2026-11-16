@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 import textwrap
 from dataclasses import dataclass, field
@@ -38,12 +39,20 @@ def build_queue(
     today: date,
     new_limit: int,
     new_today: int = 0,
+    *, order: str = "due",
 ) -> list[Card]:
-    """Due cards oldest first, then as many new cards as today's limit allows."""
+    """Order due cards and the new cards admitted by today's allowance."""
+    if order not in {"due", "random", "deck"}:
+        raise ValueError(f"unknown review order: {order}")
     due = [c for c in cards if c.id in states and states[c.id].due <= today]
     due.sort(key=lambda c: (states[c.id].due, c.deck, c.line))
     fresh = [c for c in cards if c.id not in states]
-    return due + fresh[: max(0, new_limit - new_today)]
+    queue = due + fresh[: max(0, new_limit - new_today)]
+    if order == "random":
+        random.shuffle(queue)
+    elif order == "deck":
+        queue.sort(key=lambda c: (c.deck, c.line))
+    return queue
 
 
 def next_due(
@@ -258,7 +267,7 @@ def _next_line(upcoming: tuple[date, int] | None) -> str:
 
 def run_review(
     root: Path, db_path: Path | None, new_limit: int, term: Terminal, today: date,
-    *, limit: int | None = None, only: str | None = None,
+    *, limit: int | None = None, only: str | None = None, order: str = "due",
 ) -> int:
     folder = root.parent if root.is_file() else root
     # Assign duplicate ids across the whole folder before selecting a subset.
@@ -276,7 +285,9 @@ def run_review(
     live = {c.id for c in cards}
     with Store(db_path or folder / ".drill.db") as store:
         states = store.states()
-        queue = build_queue(cards, states, today, new_limit, store.new_introduced_on(today))
+        queue = build_queue(
+            cards, states, today, new_limit, store.new_introduced_on(today), order=order
+        )
         if limit is not None:
             queue = queue[:limit]
         if not queue:

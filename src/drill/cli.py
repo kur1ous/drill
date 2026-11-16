@@ -34,6 +34,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, metavar="N", help="maximum cards per session (positive integer)"
     )
     review.add_argument(
+        "--order", choices=("due", "random", "deck"), default="due",
+        help="review queue order (default: due, oldest first)",
+    )
+    review.add_argument(
         "--db", type=Path, metavar="FILE", help="state file (default: deck folder/.drill.db)"
     )
     return parser
@@ -97,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return run_review(
                 args.dir, db_path, max(0, args.new), system_terminal(), date.today(),
-                limit=args.limit, only=args.only,
+                limit=args.limit, only=args.only, order=args.order,
             )
         except (DeckReadError, UnsupportedSchemaError) as exc:
             print(f"drill: {exc}", file=sys.stderr)
