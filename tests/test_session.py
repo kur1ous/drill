@@ -86,6 +86,57 @@ def test_queue_rejects_unknown_order():
         build_queue([], {}, TODAY, new_limit=1, order="unknown")
 
 
+@pytest.mark.parametrize("order", ["due", "deck", "random"])
+def test_per_deck_allowances_survive_filtering_and_session_limits(tmp_path, order):
+    for name in ("unit/a", "unit/b", "unit/c", "other", "extra"):
+        path = tmp_path / f"{name}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(f"## {name} {i}\nAnswer\n" for i in range(3)), encoding="utf-8")
+    rules = {"unit/*": {"new_per_day": 2}, "unit/b": {"new_per_day": 0}}
+
+    def run(only=None, limit=None, keys="b" + " 3" * 10, day=TODAY):
+        term = Fake(keys)
+        assert run_review(tmp_path, None, 1, term, day, only=only, limit=limit,
+                          order=order, deck_rules=rules) == 0
+        return term.text
+
+    assert "Done. 1 card reviewed." in run("unit/a", limit=1)
+    assert "0 due, 1 new" in run("unit/a")
+    assert "Nothing due." in run("unit/a")
+    assert "Nothing due." in run("unit/b")
+    assert "0 due, 2 new" in run("unit/c")
+    assert "Done. 1 card reviewed." in run("other")
+    assert "Nothing due." in run("extra")
+    assert "Nothing due." in run()
+    with Store(tmp_path / ".drill.db") as store:
+        states = list(store.states().values())
+        assert sorted(s.deck for s in states) == ["other", "unit/a", "unit/a", "unit/c", "unit/c"]
+        queue = build_queue(load_deck(tmp_path), store.states(), TODAY, 1,
+                            deck_limits={"unit/a": 2, "unit/c": 2})
+        assert len(queue) == 1
+        card = next(c for c in load_deck(tmp_path) if c.deck == "unit/b")
+        previous = apply_grade(None, card.id, card.deck, Grade.GOOD, TODAY - timedelta(days=9))
+        store.record(None, replace(previous, due=TODAY), Grade.GOOD)
+    assert "1 due, 0 new" in run("unit/b")
+    assert "0 due, 1 new" in run("unit/a", day=TODAY + timedelta(days=1))
+
+
+def test_deck_retention_survives_undo_between_decks(tmp_path):
+    for name in ("a", "b"):
+        (tmp_path / f"{name}.md").write_text(f"## {name}\nAnswer\n", encoding="utf-8")
+    term = Fake("b 1u 3 3")
+    run_review(tmp_path, None, 10, term, TODAY, retention=0.95,
+               deck_rules={"a": {"retention": 0.8}})
+    with Store(tmp_path / ".drill.db") as store:
+        for card in load_deck(tmp_path):
+            expected = apply_grade(None, card.id, card.deck, Grade.GOOD, TODAY,
+                                   retention=0.8 if card.deck == "a" else 0.95)
+            assert store.get(card.id) == expected
+            assert f"3 good {(expected.due - TODAY).days}d" in term.text
+        assert store.new_introduced_on(TODAY) == 2
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 2
+
+
 def test_review_records_each_grade(tmp_path):
     make_deck(tmp_path)
     term = Fake("b 3 4")

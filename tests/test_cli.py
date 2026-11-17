@@ -199,6 +199,14 @@ def test_review_config_precedence(tmp_path, monkeypatch, file_input, config, fla
     (b'db = " "', "db"),
     (b'db = "\\u0000"', "db"),
     (b"new_perday = 4", "unknown setting"),
+    (b"deck = []", "deck"),
+    (b"[deck]\nnotes = 3", "deck.'notes'"),
+    (b'[deck.""]\nretention = 0.8', "nonempty glob"),
+    (b'[deck."unit/*"]\norder = "due"', "unknown setting"),
+    *[(f'[deck."unit/*"]\nnew_per_day = {value}'.encode(), "new_per_day")
+      for value in ("-1", "true", "1.5", '"2"', "[]")],
+    *[(f'[deck."unit/*"]\nretention = {value}'.encode(), "retention")
+      for value in ("0", "1", "true", "nan", "inf", '"0.9"', "[]")],
     *[(f"retention = {value}".encode(), "retention") for value in
       ("0", "1", "-0.1", "1.1", "true", '"0.9"', "[]", "nan", "inf", "-inf")],
 ])
@@ -500,3 +508,27 @@ def test_config_retention_controls_display_and_saved_due(tmp_path, monkeypatch, 
         assert f"{int(grade)} {grade.name.lower()} {days}d" in "".join(output)
     with Store(tmp_path / ".drill.db") as store:
         assert store.get(card.id).due == today + timedelta(days=intervals[Grade.GOOD])
+
+
+@pytest.mark.parametrize("flags, expected", [([], 2), (["--new", "0"], 0), (["--new", "1"], 1)])
+def test_deck_config_overrides_and_cli_new(tmp_path, monkeypatch, flags, expected):
+    (tmp_path / "notes.md").write_text("## One\nA\n## Two\nB\n", encoding="utf-8")
+    (tmp_path / ".drill.toml").write_text(
+        'new_per_day = 0\nretention = 0.95\n'
+        '[deck."*"]\nnew_per_day = 2\nretention = 0.85\n'
+        '[deck."NOTES"]\nnew_per_day = 0\n'
+        '[deck."notes"]\nretention = 0.8\n', encoding="utf-8",
+    )
+    keys = iter("b 3 3")
+    output = []
+    monkeypatch.setattr("drill.term.system_terminal", lambda: Terminal(
+        output.append, lambda: next(keys, EOF_KEY), ansi=False,
+    ))
+    assert main(["review", str(tmp_path), *flags]) == 0
+    with Store(tmp_path / ".drill.db") as store:
+        states = store.states()
+    assert len(states) == expected
+    for state in states.values():
+        intervals = preview_intervals(None, date.today(), state.id, retention=0.8)
+        assert state.due == date.today() + timedelta(days=intervals[Grade.GOOD])
+        assert f"3 good {intervals[Grade.GOOD]}d" in "".join(output)

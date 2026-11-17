@@ -79,7 +79,7 @@ parent as the deck folder and shares that folder's `.drill.db`; `--db` overrides
 this. The whole folder is read before filtering so duplicate questions keep
 their IDs. For nested files in a larger collection, use that collection's folder
 with `--only` to keep the same deck names and history. No matching cards exits
-with code 1. The daily new-card allowance remains shared across the database.
+with code 1. Daily allowances include earlier sessions, even with another filter.
 
 Run `drill check notes/` to report files with no cards, `##` headings with empty
 bodies, and exact duplicate questions within or across files. Locations are
@@ -110,6 +110,23 @@ including unknown settings, report the file and exit with code 2.
 `retention` is the desired probability of recall, strictly between 0 and 1
 (default 0.9). Higher values shorten review intervals; lower values lengthen
 them. It affects previews and future grades, leaving existing due dates unchanged.
+
+Per-deck tables override `new_per_day` and `retention` using the same case-sensitive
+globs as `--only`:
+
+```toml
+[deck."unit1/*"]
+new_per_day = 5
+retention = 0.95
+```
+
+Each matching deck gets its own daily new-card allowance. Decks without a
+`new_per_day` override share the top-level allowance, excluding introductions
+in decks with their own allowance. Zero disables new cards but keeps due reviews.
+When patterns overlap, later tables win for each setting they specify; omitted
+settings inherit earlier matches or the top-level default. `--new N` overrides
+all new-card settings with one shared database-wide allowance. Retention applies
+to both interval previews and saved grades.
 
 By default, review history lives in `.drill.db` inside the deck folder. Use `db`
 or `--db FILE` to put it elsewhere. It is an ordinary SQLite file: commit it with

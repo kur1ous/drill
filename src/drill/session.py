@@ -5,11 +5,13 @@ from __future__ import annotations
 import random
 import re
 import textwrap
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+from drill.config import deck_settings
 from drill.deck import Card, load_deck
 from drill.fsrs import Grade
 from drill.schedule import CardState, apply_grade, preview_intervals
@@ -39,7 +41,7 @@ def build_queue(
     today: date,
     new_limit: int,
     new_today: int = 0,
-    *, order: str = "due",
+    *, order: str = "due", deck_limits: dict[str, int] | None = None,
 ) -> list[Card]:
     """Order due cards and the new cards admitted by today's allowance."""
     if order not in {"due", "random", "deck"}:
@@ -47,7 +49,19 @@ def build_queue(
     due = [c for c in cards if c.id in states and states[c.id].due <= today]
     due.sort(key=lambda c: (states[c.id].due, c.deck, c.line))
     fresh = [c for c in cards if c.id not in states]
-    queue = due + fresh[: max(0, new_limit - new_today)]
+    deck_limits = deck_limits or {}
+    introduced = Counter(s.deck for s in states.values()
+                         if s.introduced == today and s.deck in deck_limits)
+    remaining = {deck: max(0, count - introduced[deck])
+                 for deck, count in deck_limits.items()}
+    shared_today = max(0, new_today - sum(introduced.values()))
+    remaining[None] = max(0, new_limit - shared_today)
+    queue = list(due)
+    for card in fresh:
+        budget = card.deck if card.deck in deck_limits else None
+        if remaining[budget] > 0:
+            queue.append(card)
+            remaining[budget] -= 1
     if order == "random":
         random.shuffle(queue)
     elif order == "deck":
@@ -162,6 +176,7 @@ def _ask(term: Terminal, wanted: set[str]) -> str | None:
 
 def review(
     queue: list[Card], store: Store, term: Terminal, today: date, retention: float = 0.9,
+    *, deck_retentions: dict[str, float] | None = None,
 ) -> Summary:
     summary = Summary()
     queue = list(queue)
@@ -182,6 +197,7 @@ def review(
         last_grade = None
         while position < len(queue):
             card = queue[position]
+            card_retention = (deck_retentions or {}).get(card.deck, retention)
             practice = position >= scheduled_count
             state = store.get(card.id)
             _screen(term, card, position + 1, len(queue))
@@ -227,7 +243,7 @@ def review(
                 last_grade = None
                 position += 1
                 continue
-            days = preview_intervals(state, today, card.id, retention)
+            days = preview_intervals(state, today, card.id, card_retention)
             labels = [
                 f"{term.accent(str(int(g)))} {g.name.lower()} {term.dim(_days(days[g]))}"
                 for g in Grade
@@ -248,7 +264,7 @@ def review(
                 break
 
             grade = _GRADE_KEYS[key]
-            store.record(state, apply_grade(state, card.id, card.deck, grade, today, retention), grade)
+            store.record(state, apply_grade(state, card.id, card.deck, grade, today, card_retention), grade)
             summary.reviewed += 1
             summary.counts[grade] = summary.counts.get(grade, 0) + 1
             if grade == Grade.AGAIN:
@@ -271,6 +287,7 @@ def run_review(
     root: Path, db_path: Path | None, new_limit: int, term: Terminal, today: date,
     *, limit: int | None = None, only: str | None = None, order: str = "due",
     retention: float = 0.9,
+    deck_rules: dict | None = None,
 ) -> int:
     folder = root.parent if root.is_file() else root
     # Assign duplicate ids across the whole folder before selecting a subset.
@@ -288,8 +305,12 @@ def run_review(
     live = {c.id for c in cards}
     with Store(db_path or folder / ".drill.db") as store:
         states = store.states()
+        decks = {c.deck for c in cards} | {s.deck for s in states.values()}
+        settings = {deck: deck_settings(deck, deck_rules or {}) for deck in decks}
         queue = build_queue(
-            cards, states, today, new_limit, store.new_introduced_on(today), order=order
+            cards, states, today, new_limit, store.new_introduced_on(today), order=order,
+            deck_limits={deck: values["new_per_day"] for deck, values in settings.items()
+                         if "new_per_day" in values},
         )
         if limit is not None:
             queue = queue[:limit]
@@ -300,7 +321,10 @@ def run_review(
             _write_text(term, _next_line(next_due(states, live, today)))
             term.write("\n")
             return 0
-        summary = review(queue, store, term, today, retention)
+        summary = review(queue, store, term, today, retention,
+                         deck_retentions={deck: values["retention"]
+                                          for deck, values in settings.items()
+                                          if "retention" in values})
         term.refresh_width()
         term.clear()
         verb = "Done" if summary.finished else "Stopped"

@@ -107,11 +107,16 @@ def main(argv: list[str] | None = None) -> int:
         db_path = args.db if args.db is not None else settings.get("db", folder / ".drill.db")
         new_per_day = args.new if args.new is not None else settings.get("new_per_day", 10)
         order = args.order if args.order is not None else settings.get("order", "due")
+        deck_rules = settings.get("deck", {})
+        if args.new is not None:
+            deck_rules = {pattern: {k: v for k, v in values.items() if k != "new_per_day"}
+                          for pattern, values in deck_rules.items()}
         try:
             return run_review(
                 args.dir, db_path, max(0, new_per_day), system_terminal(), date.today(),
                 limit=args.limit, only=args.only, order=order,
                 retention=settings.get("retention", 0.9),
+                deck_rules=deck_rules,
             )
         except (DeckReadError, UnsupportedSchemaError) as exc:
             print(f"drill: {exc}", file=sys.stderr)
