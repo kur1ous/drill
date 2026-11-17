@@ -150,6 +150,80 @@ def test_review_rejects_unknown_order(tmp_path, capsys):
     assert not (tmp_path / ".drill.db").exists()
 
 
+@pytest.mark.parametrize("file_input", [False, True])
+@pytest.mark.parametrize("config, flags, expected", [
+    (None, [], (10, "due", ".drill.db")),
+    ("", [], (10, "due", ".drill.db")),
+    ('order = "deck"', [], (10, "deck", ".drill.db")),
+    ('new_per_day = 0', [], (0, "due", ".drill.db")),
+    ('new_per_day = 3\norder = "random"\ndb = "history.sqlite"',
+     [], (3, "random", "history.sqlite")),
+    ('new_per_day = 3\norder = "random"\ndb = "history.sqlite"',
+     ["--new", "0", "--order", "due", "--db", "override.sqlite"],
+     (0, "due", "override.sqlite")),
+])
+def test_review_config_precedence(tmp_path, monkeypatch, file_input, config, flags, expected):
+    folder = tmp_path / "notes"
+    folder.mkdir()
+    deck = folder / "cards.md"
+    deck.write_text("## Q\nA\n", encoding="utf-8")
+    if config is not None:
+        (folder / ".drill.toml").write_text(config, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # Discovery is tied to the deck folder, not the working directory.
+    (tmp_path / ".drill.toml").write_text("invalid TOML", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr("drill.session.run_review", lambda *a, **kw: calls.append((a, kw)) or 0)
+    monkeypatch.setattr("drill.term.system_terminal", lambda: None)
+    target = deck if file_input else folder
+    assert main(["review", str(target), *flags]) == 0
+    (args, kwargs), = calls
+    count, order, db = expected
+    assert args[0] == target
+    assert args[1] == (Path(db) if "--db" in flags else folder / db)
+    assert args[2] == count
+    assert kwargs["order"] == order
+
+
+@pytest.mark.parametrize("config, setting", [
+    (b"new_per_day = [", "invalid config"),
+    (b"\xff", "cannot read"),
+    (b"new_per_day = true", "new_per_day"),
+    (b"new_per_day = -1", "new_per_day"),
+    (b"new_per_day = 1.5", "new_per_day"),
+    (b'new_per_day = "10"', "new_per_day"),
+    (b'order = "unknown"', "order"),
+    (b"order = []", "order"),
+    (b"db = 12", "db"),
+    (b'db = " "', "db"),
+    (b'db = "\\u0000"', "db"),
+    (b"new_perday = 4", "unknown setting"),
+])
+def test_review_reports_invalid_config_before_starting(tmp_path, monkeypatch, capsys, config, setting):
+    path = tmp_path / ".drill.toml"
+    path.write_bytes(config)
+    monkeypatch.setattr("drill.term.system_terminal", lambda: pytest.fail("unexpected terminal"))
+    assert main(["review", str(tmp_path)]) == 2
+    error = capsys.readouterr().err
+    assert str(path) in error
+    assert setting in error
+    assert "Traceback" not in error
+    assert not (tmp_path / ".drill.db").exists()
+
+
+def test_review_reports_unreadable_config(tmp_path, monkeypatch, capsys):
+    path = tmp_path / ".drill.toml"
+
+    def denied(path, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(Path, "read_text", denied)
+    assert main(["review", str(tmp_path)]) == 2
+    error = capsys.readouterr().err
+    assert str(path) in error and "Permission denied" in error
+    assert not (tmp_path / ".drill.db").exists()
+
+
 @pytest.fixture
 def deck_file(tmp_path, monkeypatch):
     path = tmp_path / "notes.md"
@@ -160,6 +234,18 @@ def deck_file(tmp_path, monkeypatch):
         lambda: Terminal(lambda text: None, lambda: next(keys, EOF_KEY)),
     )
     return path
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_review_saves_to_configured_database(deck_file, absolute):
+    folder = deck_file.parent
+    database = folder / "history.sqlite"
+    db = database.as_posix() if absolute else database.name
+    (folder / ".drill.toml").write_text(f'db = "{db}"\n', encoding="utf-8")
+    assert main(["review", str(deck_file)]) == 0
+    with Store(database) as store:
+        assert len(store.states()) == 1
+    assert not (folder / ".drill.db").exists()
 
 
 @pytest.mark.parametrize("selection, expected", [

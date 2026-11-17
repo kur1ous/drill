@@ -90,8 +90,25 @@ untouched and exits with code 0 for no issues, 1 for findings, or 2 for read err
 
 ## Where review history lives
 
-In `.drill.db` inside the deck folder (`--db FILE` to put it elsewhere). It is an
-ordinary SQLite file: commit it with your notes or add it to `.gitignore`.
+Put review defaults in `.drill.toml` in the deck folder (the parent when reviewing
+one file):
+
+```toml
+new_per_day = 10
+order = "due"
+db = "history.sqlite"
+```
+
+All settings are optional. `new_per_day` must be a nonnegative integer; zero
+disables new cards. `order` accepts `due`, `random`, or `deck`. Relative `db`
+paths resolve from the config's folder. `--new`, `--order`, and `--db` override
+these settings; a relative `--db` path resolves from the current directory.
+Missing settings keep the usual defaults. Invalid or unreadable config files,
+including unknown settings, report the file and exit with code 2.
+
+By default, review history lives in `.drill.db` inside the deck folder. Use `db`
+or `--db FILE` to put it elsewhere. It is an ordinary SQLite file: commit it with
+your notes or add it to `.gitignore`.
 Unreadable decks and database errors (including corruption or locks) report
 the affected file on stderr and exit with code 2, without a traceback.
 

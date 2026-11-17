@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from drill import __version__
+from drill.config import ConfigError, load_config
 from drill.deck import DeckReadError, check_deck
 
 
@@ -28,17 +29,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--only", metavar="PATTERN", help="case-sensitive glob on deck names without .md"
     )
     review.add_argument(
-        "--new", type=int, default=10, metavar="N", help="new cards per day (default 10)"
+        "--new", type=int, metavar="N", help="new cards per day (config or default 10)"
     )
     review.add_argument(
         "--limit", type=int, metavar="N", help="maximum cards per session (positive integer)"
     )
     review.add_argument(
-        "--order", choices=("due", "random", "deck"), default="due",
-        help="review queue order (default: due, oldest first)",
+        "--order", choices=("due", "random", "deck"),
+        help="review queue order (config or default: due, oldest first)",
     )
     review.add_argument(
-        "--db", type=Path, metavar="FILE", help="state file (default: deck folder/.drill.db)"
+        "--db", type=Path, metavar="FILE",
+        help="state file (config or default: deck folder/.drill.db)",
     )
     return parser
 
@@ -97,11 +99,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"drill: not a directory or .md file: {args.dir}", file=sys.stderr)
             return 2
         folder = args.dir.parent if is_file else args.dir
-        db_path = args.db or folder / ".drill.db"
+        try:
+            settings = load_config(folder)
+        except ConfigError as exc:
+            print(f"drill: {exc}", file=sys.stderr)
+            return 2
+        db_path = args.db if args.db is not None else settings.get("db", folder / ".drill.db")
+        new_per_day = args.new if args.new is not None else settings.get("new_per_day", 10)
+        order = args.order if args.order is not None else settings.get("order", "due")
         try:
             return run_review(
-                args.dir, db_path, max(0, args.new), system_terminal(), date.today(),
-                limit=args.limit, only=args.only, order=args.order,
+                args.dir, db_path, max(0, new_per_day), system_terminal(), date.today(),
+                limit=args.limit, only=args.only, order=order,
             )
         except (DeckReadError, UnsupportedSchemaError) as exc:
             print(f"drill: {exc}", file=sys.stderr)
