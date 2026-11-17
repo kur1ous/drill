@@ -321,6 +321,28 @@ def test_review_no_matching_decks_does_not_open_database(
     assert not (deck_file.parent / ".drill.db").exists()
 
 
+@pytest.mark.skipif(Path("notes") != Path("NOTES"), reason="Windows path casing")
+@pytest.mark.parametrize("pattern", [None, "notes", "NOTES"])
+def test_file_review_uses_native_path_casing(deck_file, pattern):
+    root = deck_file.parent
+    (root / "a.md").write_text("## Question\nOther answer\n", encoding="utf-8")
+    selected = next(c for c in load_deck(root) if c.deck == "notes")
+    target = root / "NOTES.md"
+    assert target.is_file()
+    args = ["review", str(target)]
+    if pattern is not None:
+        args += ["--only", pattern]
+    database = root / ".drill.db"
+    if pattern == "NOTES":
+        assert main(args) == 1
+        assert not database.exists()
+    else:
+        assert main(args) == 0
+        with Store(database) as store:
+            assert list(store.states()) == [selected.id]
+            assert store.get(selected.id).deck == "notes"
+
+
 @pytest.mark.parametrize("existing", [False, True])
 def test_review_rejects_missing_or_non_markdown_file(tmp_path, capsys, existing):
     path = tmp_path / ("notes.txt" if existing else "missing.md")

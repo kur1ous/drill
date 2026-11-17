@@ -297,7 +297,7 @@ def run_review(
     # Assign duplicate ids across the whole folder before selecting a subset.
     cards = load_deck(folder)
     if folder != root:
-        cards = [c for c in cards if c.deck == root.stem]
+        cards = [c for c in cards if Path(c.deck) == Path(root.stem)]
     if only is not None:
         cards = [c for c in cards if fnmatchcase(c.deck, only)]
     if not cards:
