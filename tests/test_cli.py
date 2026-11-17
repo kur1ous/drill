@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from drill import __version__
+from drill import __version__, fsrs
 from drill.cli import main
 from drill.deck import check_deck, load_deck
 from drill.fsrs import Grade
@@ -209,6 +209,11 @@ def test_review_config_precedence(tmp_path, monkeypatch, file_input, config, fla
       for value in ("0", "1", "true", "nan", "inf", '"0.9"', "[]")],
     *[(f"retention = {value}".encode(), "retention") for value in
       ("0", "1", "-0.1", "1.1", "true", '"0.9"', "[]", "nan", "inf", "-inf")],
+    *[(f"weights = {value}".encode(), "weights") for value in
+      ('"defaults"', "17", "{}", "[]", "[1, 2]", str([1] * 16), str([1] * 18))],
+    *[(f"weights = [{value}, {', '.join(map(str, fsrs.DEFAULT_WEIGHTS[1:]))}]".encode(),
+       "weights[0]")
+      for value in ("true", '"1"', "[]", "nan", "inf", "-inf", "0", "101")],
 ])
 def test_review_reports_invalid_config_before_starting(tmp_path, monkeypatch, capsys, config, setting):
     path = tmp_path / ".drill.toml"
@@ -532,3 +537,40 @@ def test_deck_config_overrides_and_cli_new(tmp_path, monkeypatch, flags, expecte
         intervals = preview_intervals(None, date.today(), state.id, retention=0.8)
         assert state.due == date.today() + timedelta(days=intervals[Grade.GOOD])
         assert f"3 good {intervals[Grade.GOOD]}d" in "".join(output)
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("grade", list(Grade))
+def test_custom_weights_control_previews_and_saved_memory(tmp_path, monkeypatch, existing, grade):
+    deck = tmp_path / "notes.md"
+    deck.write_text("## Q\nA\n", encoding="utf-8")
+    weights = (1, 2, 12, 25, 6, 1, 1, 0.2, 0.5, 0.1, 1, 0.5, 0.1, 0.3, 1, 0.5, 2)
+    (tmp_path / ".drill.toml").write_text(
+        f'weights = {list(weights)}\n[deck."notes"]\nretention = 0.8\n', encoding="utf-8",
+    )
+    card, = load_deck(tmp_path)
+    today = date.today()
+    before = None
+    if existing:
+        before = apply_grade(None, card.id, card.deck, Grade.GOOD, today - timedelta(days=30))
+        before = replace(before, stability=30, difficulty=5, due=today)
+        with Store(tmp_path / ".drill.db") as store:
+            store.record(None, before, Grade.GOOD)
+        expected_memory = fsrs.next_memory(fsrs.Memory(30, 5), grade, 30, weights)
+    else:
+        expected_memory = fsrs.initial(grade, weights)
+    intervals = preview_intervals(before, today, card.id, retention=0.8, weights=weights)
+    keys = iter(f"b {int(grade)}q")
+    output = []
+    monkeypatch.setattr("drill.term.system_terminal", lambda: Terminal(
+        output.append, lambda: next(keys, EOF_KEY), ansi=False,
+    ))
+    assert main(["review", str(deck if existing else tmp_path)]) == 0
+    for offered_grade, days in intervals.items():
+        assert f"{int(offered_grade)} {offered_grade.name.lower()} {days}d" in "".join(output)
+    with Store(tmp_path / ".drill.db") as store:
+        saved = store.get(card.id)
+    assert fsrs.Memory(saved.stability, saved.difficulty) == expected_memory
+    assert saved.due == today + timedelta(days=intervals[grade])
+    default = apply_grade(before, card.id, card.deck, grade, today, retention=0.8)
+    assert saved.stability != default.stability

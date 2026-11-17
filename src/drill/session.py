@@ -13,7 +13,7 @@ from pathlib import Path
 
 from drill.config import deck_settings
 from drill.deck import Card, load_deck
-from drill.fsrs import Grade
+from drill.fsrs import DEFAULT_WEIGHTS, Grade
 from drill.schedule import CardState, apply_grade, preview_intervals
 from drill.store import Store
 from drill.term import EOF_KEY, Terminal
@@ -177,6 +177,7 @@ def _ask(term: Terminal, wanted: set[str]) -> str | None:
 def review(
     queue: list[Card], store: Store, term: Terminal, today: date, retention: float = 0.9,
     *, deck_retentions: dict[str, float] | None = None,
+    weights: tuple[float, ...] = DEFAULT_WEIGHTS,
 ) -> Summary:
     summary = Summary()
     queue = list(queue)
@@ -243,7 +244,7 @@ def review(
                 last_grade = None
                 position += 1
                 continue
-            days = preview_intervals(state, today, card.id, card_retention)
+            days = preview_intervals(state, today, card.id, card_retention, weights)
             labels = [
                 f"{term.accent(str(int(g)))} {g.name.lower()} {term.dim(_days(days[g]))}"
                 for g in Grade
@@ -264,7 +265,9 @@ def review(
                 break
 
             grade = _GRADE_KEYS[key]
-            store.record(state, apply_grade(state, card.id, card.deck, grade, today, card_retention), grade)
+            store.record(state, apply_grade(
+                state, card.id, card.deck, grade, today, card_retention, weights,
+            ), grade)
             summary.reviewed += 1
             summary.counts[grade] = summary.counts.get(grade, 0) + 1
             if grade == Grade.AGAIN:
@@ -287,6 +290,7 @@ def run_review(
     root: Path, db_path: Path | None, new_limit: int, term: Terminal, today: date,
     *, limit: int | None = None, only: str | None = None, order: str = "due",
     retention: float = 0.9,
+    weights: tuple[float, ...] = DEFAULT_WEIGHTS,
     deck_rules: dict | None = None,
 ) -> int:
     folder = root.parent if root.is_file() else root
@@ -321,7 +325,7 @@ def run_review(
             _write_text(term, _next_line(next_due(states, live, today)))
             term.write("\n")
             return 0
-        summary = review(queue, store, term, today, retention,
+        summary = review(queue, store, term, today, retention, weights=weights,
                          deck_retentions={deck: values["retention"]
                                           for deck, values in settings.items()
                                           if "retention" in values})

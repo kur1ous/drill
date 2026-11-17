@@ -7,6 +7,7 @@ from pathlib import Path
 from drill import __version__
 from drill.config import ConfigError, load_config
 from drill.deck import DeckReadError, check_deck
+from drill.fsrs import DEFAULT_WEIGHTS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.dir, db_path, max(0, new_per_day), system_terminal(), date.today(),
                 limit=args.limit, only=args.only, order=order,
                 retention=settings.get("retention", 0.9),
+                weights=settings.get("weights", DEFAULT_WEIGHTS),
                 deck_rules=deck_rules,
             )
         except (DeckReadError, UnsupportedSchemaError) as exc:

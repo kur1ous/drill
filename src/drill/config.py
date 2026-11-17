@@ -3,6 +3,14 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 
+# Bounds keep stability positive, exponents bounded, and grade modifiers ordered.
+_WEIGHT_BOUNDS = (
+    *((0.01, 100),) * 4, (1, 10), (0, 5), (0, 5), (0, 1),
+    (0, 5), (0, 1), (0, 5), (0.01, 5), (0, 1), (0, 1),
+    (0, 5), (0, 1), (1, 5),
+)
+
+
 class ConfigError(ValueError):
     pass
 
@@ -36,10 +44,18 @@ def load_config(folder: Path) -> dict:
         raise ConfigError(f"cannot read {path}: {exc}") from exc
     try:
         settings = tomllib.loads(text)
-        unknown = settings.keys() - {"new_per_day", "order", "db", "retention", "deck"}
+        unknown = settings.keys() - {"new_per_day", "order", "db", "retention", "deck", "weights"}
         if unknown:
             raise ValueError(f"unknown setting: {sorted(unknown)[0]}")
         _validate_schedule(settings)
+        if "weights" in settings:
+            weights = settings["weights"]
+            if not isinstance(weights, list) or len(weights) != 17:
+                raise ValueError("weights must be an array of 17 numbers")
+            for i, (value, (low, high)) in enumerate(zip(weights, _WEIGHT_BOUNDS)):
+                if type(value) not in (int, float) or not low <= value <= high:
+                    raise ValueError(f"weights[{i}] must be a finite number between {low} and {high}")
+            settings["weights"] = tuple(weights)
         if "order" in settings and settings["order"] not in ("due", "random", "deck"):
             raise ValueError("order must be due, random, or deck")
         rules = settings.get("deck", {})

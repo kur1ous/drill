@@ -111,6 +111,32 @@ including unknown settings, report the file and exit with code 2.
 (default 0.9). Higher values shorten review intervals; lower values lengthen
 them. It affects previews and future grades, leaving existing due dates unchanged.
 
+To use custom FSRS-4.5 weights, set a top-level `weights` array before any
+`[deck."..."]` tables. For example, the built-in defaults are:
+
+```toml
+weights = [
+  0.5701, 1.4436, 4.1386, 10.9355, 5.1443, 1.2006, 0.8627, 0.0362,
+  1.629, 0.1342, 1.0166, 2.1174, 0.0839, 0.3204, 1.4676, 0.219, 2.8237,
+]
+```
+
+Exactly 17 finite numbers are required. Drill accepts these inclusive ranges
+(indices start at zero):
+
+| Indices | Range |
+| --- | --- |
+| 0–3 | 0.01–100 |
+| 4 | 1–10 |
+| 5, 6, 8, 10, 14 | 0–5 |
+| 7, 9, 12, 13, 15 | 0–1 |
+| 11 | 0.01–5 |
+| 16 | 1–5 |
+
+Weights apply to all decks, including interval previews and future grades of
+both new and previously reviewed cards. Existing due dates stay unchanged
+until grading; omitting `weights` keeps the built-in defaults.
+
 Per-deck tables override `new_per_day` and `retention` using the same case-sensitive
 globs as `--only`:
 

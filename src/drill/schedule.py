@@ -27,19 +27,22 @@ class CardState:
     lapses: int = 0
 
 
-def _next_memory(state: CardState | None, grade: Grade, today: date) -> fsrs.Memory:
+def _next_memory(
+    state: CardState | None, grade: Grade, today: date, weights: tuple[float, ...],
+) -> fsrs.Memory:
     if state is None:
-        return fsrs.initial(grade)
+        return fsrs.initial(grade, weights)
     elapsed = max(0, (today - state.last_review).days)
-    return fsrs.next_memory(fsrs.Memory(state.stability, state.difficulty), grade, elapsed)
+    return fsrs.next_memory(fsrs.Memory(state.stability, state.difficulty), grade, elapsed, weights)
 
 
 def apply_grade(
     state: CardState | None, card_id: str, deck: str, grade: Grade, today: date,
     retention: float = 0.9,
+    weights: tuple[float, ...] = fsrs.DEFAULT_WEIGHTS,
 ) -> CardState:
     """New state after grading. `state` is None for a card never reviewed."""
-    mem = _next_memory(state, grade, today)
+    mem = _next_memory(state, grade, today, weights)
     if state is None:
         lapses = 0
         reps = 1
@@ -48,7 +51,7 @@ def apply_grade(
         lapses = state.lapses + (grade == Grade.AGAIN)
         reps = state.reps + 1
         introduced = state.introduced
-    days = preview_intervals(state, today, card_id, retention)[grade]
+    days = preview_intervals(state, today, card_id, retention, weights)[grade]
     return CardState(
         id=card_id,
         deck=deck,
@@ -64,9 +67,10 @@ def apply_grade(
 
 def preview_intervals(
     state: CardState | None, today: date, card_id: str, retention: float = 0.9,
+    weights: tuple[float, ...] = fsrs.DEFAULT_WEIGHTS,
 ) -> dict[Grade, int]:
     """Days until next review for each possible grade, for the answer screen."""
-    out = {grade: fsrs.interval(_next_memory(state, grade, today).stability, retention)
+    out = {grade: fsrs.interval(_next_memory(state, grade, today, weights).stability, retention)
            for grade in Grade}
     # A local, string-seeded generator keeps previews and undo/regrade reproducible.
     rng = Random(f"{card_id}:{state.reps + 1 if state else 1}")
