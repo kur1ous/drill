@@ -95,6 +95,7 @@ one file):
 
 ```toml
 new_per_day = 10
+retention = 0.9
 order = "due"
 db = "history.sqlite"
 ```
@@ -105,6 +106,10 @@ paths resolve from the config's folder. `--new`, `--order`, and `--db` override
 these settings; a relative `--db` path resolves from the current directory.
 Missing settings keep the usual defaults. Invalid or unreadable config files,
 including unknown settings, report the file and exit with code 2.
+
+`retention` is the desired probability of recall, strictly between 0 and 1
+(default 0.9). Higher values shorten review intervals; lower values lengthen
+them. It affects previews and future grades, leaving existing due dates unchanged.
 
 By default, review history lives in `.drill.db` inside the deck folder. Use `db`
 or `--db FILE` to put it elsewhere. It is an ordinary SQLite file: commit it with

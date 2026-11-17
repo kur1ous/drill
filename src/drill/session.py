@@ -160,7 +160,9 @@ def _ask(term: Terminal, wanted: set[str]) -> str | None:
             return key.lower()
 
 
-def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summary:
+def review(
+    queue: list[Card], store: Store, term: Terminal, today: date, retention: float = 0.9,
+) -> Summary:
     summary = Summary()
     queue = list(queue)
     scheduled_count = len(queue)
@@ -225,7 +227,7 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
                 last_grade = None
                 position += 1
                 continue
-            days = preview_intervals(state, today, card.id)
+            days = preview_intervals(state, today, card.id, retention)
             labels = [
                 f"{term.accent(str(int(g)))} {g.name.lower()} {term.dim(_days(days[g]))}"
                 for g in Grade
@@ -246,7 +248,7 @@ def review(queue: list[Card], store: Store, term: Terminal, today: date) -> Summ
                 break
 
             grade = _GRADE_KEYS[key]
-            store.record(state, apply_grade(state, card.id, card.deck, grade, today), grade)
+            store.record(state, apply_grade(state, card.id, card.deck, grade, today, retention), grade)
             summary.reviewed += 1
             summary.counts[grade] = summary.counts.get(grade, 0) + 1
             if grade == Grade.AGAIN:
@@ -268,6 +270,7 @@ def _next_line(upcoming: tuple[date, int] | None) -> str:
 def run_review(
     root: Path, db_path: Path | None, new_limit: int, term: Terminal, today: date,
     *, limit: int | None = None, only: str | None = None, order: str = "due",
+    retention: float = 0.9,
 ) -> int:
     folder = root.parent if root.is_file() else root
     # Assign duplicate ids across the whole folder before selecting a subset.
@@ -297,7 +300,7 @@ def run_review(
             _write_text(term, _next_line(next_due(states, live, today)))
             term.write("\n")
             return 0
-        summary = review(queue, store, term, today)
+        summary = review(queue, store, term, today, retention)
         term.refresh_width()
         term.clear()
         verb = "Done" if summary.finished else "Stopped"

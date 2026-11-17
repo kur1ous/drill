@@ -111,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             return run_review(
                 args.dir, db_path, max(0, new_per_day), system_terminal(), date.today(),
                 limit=args.limit, only=args.only, order=order,
+                retention=settings.get("retention", 0.9),
             )
         except (DeckReadError, UnsupportedSchemaError) as exc:
             print(f"drill: {exc}", file=sys.stderr)

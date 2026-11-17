@@ -53,6 +53,11 @@ def retrievability(elapsed_days: float, stability: float) -> float:
 
 def interval(stability: float, retention: float = 0.9) -> int:
     """Whole days until retrievability drops to `retention` (at least 1)."""
+    if type(retention) not in (int, float) or not 0 < retention < 1:
+        raise ValueError("retention must be a number strictly between 0 and 1")
+    # Apply the cap before exponentiation so tiny retention values cannot overflow.
+    if retention <= retrievability(MAX_INTERVAL, stability):
+        return MAX_INTERVAL
     days = stability / FACTOR * (retention ** (1 / DECAY) - 1)
     return min(MAX_INTERVAL, max(1, math.floor(days + 0.5)))
 

@@ -146,27 +146,29 @@ def test_preview_intervals_for_new_card():
     assert 10 <= intervals[Grade.EASY] <= 12
 
 
-def test_new_card_preview_matches_saved_schedule():
-    intervals = preview_intervals(None, TODAY, "abc")
+@pytest.mark.parametrize("retention", [0.8, 0.9, 0.95])
+def test_new_card_preview_matches_saved_schedule(retention):
+    intervals = preview_intervals(None, TODAY, "abc", retention)
     for grade in Grade:
-        after = apply_grade(None, "abc", "bio", grade, TODAY)
+        after = apply_grade(None, "abc", "bio", grade, TODAY, retention)
         assert (after.due - TODAY).days == intervals[grade]
 
 
+@pytest.mark.parametrize("retention", [0.8, 0.9, 0.95])
 @pytest.mark.parametrize("stability", [0.01, 0.3, 1, 4, 30, 300, 36500, 1e9])
 @pytest.mark.parametrize("difficulty", [1, 5, 10])
 @pytest.mark.parametrize("elapsed", [-1, 0, 1, 30, 3650])
-def test_review_intervals_are_ordered_and_match_saved_schedule(stability, difficulty, elapsed):
+def test_review_intervals_are_ordered_and_match_saved_schedule(stability, difficulty, elapsed, retention):
     state = CardState(
         id="abc", deck="bio", stability=stability, difficulty=difficulty,
         due=TODAY, last_review=TODAY - timedelta(days=elapsed),
         introduced=TODAY - timedelta(days=3650), reps=20, lapses=2,
     )
-    intervals = preview_intervals(state, TODAY, state.id)
+    intervals = preview_intervals(state, TODAY, state.id, retention)
     again, hard, good, easy = (intervals[grade] for grade in Grade)
     assert 1 <= again <= hard < good < easy <= fsrs.MAX_INTERVAL
     for grade in Grade:
-        after = apply_grade(state, state.id, state.deck, grade, TODAY)
+        after = apply_grade(state, state.id, state.deck, grade, TODAY, retention)
         assert (after.due - TODAY).days == intervals[grade]
         memory = fsrs.next_memory(Memory(stability, difficulty), grade, max(0, elapsed))
         assert after.stability == memory.stability
@@ -191,7 +193,7 @@ def test_interval_cap_leaves_room_for_successful_grades():
 
 @pytest.mark.parametrize("days", [1, 2, 3, 20, 100, fsrs.MAX_INTERVAL])
 def test_fuzz_bounds_and_short_intervals(monkeypatch, days):
-    monkeypatch.setattr(fsrs, "interval", lambda stability: days)
+    monkeypatch.setattr(fsrs, "interval", lambda stability, retention: days)
     for i in range(50):
         intervals = preview_intervals(None, TODAY, str(i))
         again, hard, good, easy = (intervals[grade] for grade in Grade)
@@ -223,3 +225,24 @@ def test_fuzz_spreads_identical_cards_and_changes_with_review_count():
     assert len(by_reps) > 3
     new_dates = {apply_grade(None, str(i), "bio", Grade.GOOD, TODAY).due for i in range(50)}
     assert len(new_dates) == 3
+
+
+@pytest.mark.parametrize("retention", [0, 1, -0.1, 1.1, True, "0.9", float("nan"), float("inf")])
+def test_interval_rejects_invalid_retention(retention):
+    with pytest.raises(ValueError, match="retention"):
+        fsrs.interval(10, retention)
+
+
+def test_tiny_retention_is_capped_without_overflow():
+    assert fsrs.interval(10, 1e-300) == fsrs.MAX_INTERVAL
+
+
+def test_retention_changes_due_dates_without_changing_memory():
+    state = CardState("abc", "bio", 30, 5, TODAY, TODAY - timedelta(days=30), TODAY)
+    for before in (None, state):
+        default = apply_grade(before, "abc", "bio", Grade.GOOD, TODAY)
+        assert default == apply_grade(before, "abc", "bio", Grade.GOOD, TODAY, 0.9)
+        lower = apply_grade(before, "abc", "bio", Grade.GOOD, TODAY, 0.8)
+        higher = apply_grade(before, "abc", "bio", Grade.GOOD, TODAY, 0.95)
+        assert lower.due > default.due > higher.due
+        assert replace(lower, due=default.due) == default == replace(higher, due=default.due)

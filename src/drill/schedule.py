@@ -35,7 +35,8 @@ def _next_memory(state: CardState | None, grade: Grade, today: date) -> fsrs.Mem
 
 
 def apply_grade(
-    state: CardState | None, card_id: str, deck: str, grade: Grade, today: date
+    state: CardState | None, card_id: str, deck: str, grade: Grade, today: date,
+    retention: float = 0.9,
 ) -> CardState:
     """New state after grading. `state` is None for a card never reviewed."""
     mem = _next_memory(state, grade, today)
@@ -47,7 +48,7 @@ def apply_grade(
         lapses = state.lapses + (grade == Grade.AGAIN)
         reps = state.reps + 1
         introduced = state.introduced
-    days = preview_intervals(state, today, card_id)[grade]
+    days = preview_intervals(state, today, card_id, retention)[grade]
     return CardState(
         id=card_id,
         deck=deck,
@@ -61,9 +62,12 @@ def apply_grade(
     )
 
 
-def preview_intervals(state: CardState | None, today: date, card_id: str) -> dict[Grade, int]:
+def preview_intervals(
+    state: CardState | None, today: date, card_id: str, retention: float = 0.9,
+) -> dict[Grade, int]:
     """Days until next review for each possible grade, for the answer screen."""
-    out = {grade: fsrs.interval(_next_memory(state, grade, today).stability) for grade in Grade}
+    out = {grade: fsrs.interval(_next_memory(state, grade, today).stability, retention)
+           for grade in Grade}
     # A local, string-seeded generator keeps previews and undo/regrade reproducible.
     rng = Random(f"{card_id}:{state.reps + 1 if state else 1}")
     for grade, days in out.items():

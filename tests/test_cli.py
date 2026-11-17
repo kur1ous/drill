@@ -9,7 +9,7 @@ from drill import __version__
 from drill.cli import main
 from drill.deck import check_deck, load_deck
 from drill.fsrs import Grade
-from drill.schedule import apply_grade
+from drill.schedule import apply_grade, preview_intervals
 from drill.store import Store
 from drill.term import EOF_KEY, Terminal
 
@@ -183,6 +183,7 @@ def test_review_config_precedence(tmp_path, monkeypatch, file_input, config, fla
     assert args[1] == (Path(db) if "--db" in flags else folder / db)
     assert args[2] == count
     assert kwargs["order"] == order
+    assert kwargs["retention"] == 0.9
 
 
 @pytest.mark.parametrize("config, setting", [
@@ -198,6 +199,8 @@ def test_review_config_precedence(tmp_path, monkeypatch, file_input, config, fla
     (b'db = " "', "db"),
     (b'db = "\\u0000"', "db"),
     (b"new_perday = 4", "unknown setting"),
+    *[(f"retention = {value}".encode(), "retention") for value in
+      ("0", "1", "-0.1", "1.1", "true", '"0.9"', "[]", "nan", "inf", "-inf")],
 ])
 def test_review_reports_invalid_config_before_starting(tmp_path, monkeypatch, capsys, config, setting):
     path = tmp_path / ".drill.toml"
@@ -475,3 +478,25 @@ def test_unsupported_database_version_reports_file(deck_file, capsys, custom_db)
     assert "expects 1" in error
     assert "Traceback" not in error
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("file_input", [False, True])
+def test_config_retention_controls_display_and_saved_due(tmp_path, monkeypatch, file_input):
+    deck = tmp_path / "notes.md"
+    deck.write_text("## Q\nA\n", encoding="utf-8")
+    (tmp_path / ".drill.toml").write_text("retention = 0.8\n", encoding="utf-8")
+    card, = load_deck(tmp_path)
+    today = date.today()
+    intervals = preview_intervals(None, today, card.id, retention=0.8)
+    assert 9 <= intervals[Grade.GOOD] <= 11
+    keys = iter("b 3")
+    output = []
+    monkeypatch.setattr(
+        "drill.term.system_terminal",
+        lambda: Terminal(output.append, lambda: next(keys, EOF_KEY), ansi=False),
+    )
+    assert main(["review", str(deck if file_input else tmp_path)]) == 0
+    for grade, days in intervals.items():
+        assert f"{int(grade)} {grade.name.lower()} {days}d" in "".join(output)
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.get(card.id).due == today + timedelta(days=intervals[Grade.GOOD])
