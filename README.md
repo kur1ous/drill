@@ -42,6 +42,14 @@ Each direction has its own schedule. Both IDs come from the original heading,
 so editing the body keeps both histories; adding or removing ` <=>` keeps the
 forward card's history. Empty bodies still produce no cards.
 
+A body containing `{{c1::text}}` creates one card per distinct positive cloze
+number, in numeric order. Repeated numbers belong to the same card. For example,
+`{{c1::ATP}} supplies energy; {{c2::DNA}} stores genetic information.` produces
+two cards. Their IDs use the heading and cloze number, so editing the body keeps
+their histories. Clozes take precedence over ` <=>` on the same heading.
+Parsing is supported now; review still displays the original heading and body
+until cloze masking and highlighting are added.
+
 ## Run
 
 ```

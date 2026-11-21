@@ -13,6 +13,7 @@ _FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 _QUESTION = re.compile(r"^##[ \t]+(\S.*?)(?:[ \t]+#+)?[ \t]*$")
 _EMPHASIS = re.compile(r"[*_`]+")
 _SPACE = re.compile(r"\s+")
+_CLOZE = re.compile(r"\{\{c([1-9][0-9]*)::([^{}]+)\}\}")
 
 
 class DeckReadError(Exception):
@@ -27,6 +28,7 @@ class Card:
     answer: str
     line: int  # 1-based line of the heading, for error messages and editors
     reverse: bool = False
+    cloze: int | None = None
 
 
 def normalize(question: str) -> str:
@@ -62,6 +64,14 @@ def parse_markdown(text: str, deck: str = "", *, include_empty: bool = False) ->
         front = question[:-4].rstrip() if reversible else question
         # A bare heading is a section title, not a card.
         if answer.strip() or include_empty:
+            indices = sorted({int(m[1]) for m in _CLOZE.finditer(answer) if m[2].strip()})
+            if indices:
+                for index in indices:
+                    cards.append(Card(
+                        _digest(normalize(front), "cloze", str(index)),
+                        deck, front, answer, start, cloze=index,
+                    ))
+                return
             cards.append(Card(_digest(normalize(front)), deck, front, answer, start))
             if reversible and answer.strip():
                 cards.append(Card(
@@ -126,9 +136,11 @@ def check_deck(root: Path | str) -> list[str]:
         cards = parse_markdown(text, include_empty=True)
         if not any(card.answer.strip() for card in cards):
             issues.append(f"{rel.as_posix()}:1: no cards")
+        seen_lines: set[int] = set()
         for card in cards:
-            if card.reverse:
+            if card.reverse or card.line in seen_lines:
                 continue
+            seen_lines.add(card.line)
             location = f"{rel.as_posix()}:{card.line}"
             if not card.answer.strip():
                 issues.append(f"{location}: empty body for {card.question!r}")
@@ -151,6 +163,7 @@ def load_deck(root: Path | str) -> list[Card]:
     the first keeps the plain id and later ones are salted with their file and
     position, so each still gets its own schedule. Reverse cards use the source
     heading plus a direction marker, keeping both ids stable on answer edits.
+    Cloze cards use the heading plus their cloze number instead.
     """
     cards: list[Card] = []
     seen: dict[str, int] = {}
@@ -164,9 +177,12 @@ def load_deck(root: Path | str) -> list[Card]:
                 parts = (normalize(source_question), deck, str(n))
                 if card.reverse:
                     parts += ("reverse",)
+                if card.cloze is not None:
+                    parts += ("cloze", str(card.cloze))
                 card = Card(
                     _digest(*parts),
                     card.deck, card.question, card.answer, card.line, card.reverse,
+                    card.cloze,
                 )
             cards.append(card)
     return cards

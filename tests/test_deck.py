@@ -280,3 +280,78 @@ def test_check_compares_source_headings_not_generated_reverse_questions(tmp_path
     assert check_deck(tmp_path) == [
         "a.md:5: duplicate question 'First' (first at a.md:1)",
     ]
+
+
+def test_cloze_numbers_make_distinct_cards_in_numeric_order():
+    body = "{{c10::ten}} and {{c2::two}}\nAgain: {{c2::second}}."
+    cards = parse_markdown(f"# Notes\n## Numbers\n{body}\n", "math")
+    assert [c.cloze for c in cards] == [2, 10]
+    assert len({c.id for c in cards}) == 2
+    assert [(c.question, c.answer, c.deck, c.line, c.reverse) for c in cards] == [
+        ("Numbers", body, "math", 2, False),
+        ("Numbers", body, "math", 2, False),
+    ]
+
+
+def test_cloze_ids_follow_heading_and_number_not_body_or_position():
+    before = parse_markdown("## Facts?\n{{c1::one}} {{c3::three}}\n")
+    after = parse_markdown("## *facts*\n{{c3::edited}} {{c2::new}} {{c1::changed}}\n")
+    ids = {c.cloze: c.id for c in after}
+    assert all(c.id == ids[c.cloze] for c in before)
+    plain_and_reverse = parse_markdown("## Facts <=>\none\n")
+    other_heading = parse_markdown("## Other facts\n{{c1::one}}\n")
+    assert set(ids.values()).isdisjoint(c.id for c in plain_and_reverse + other_heading)
+
+
+@pytest.mark.parametrize("body", [
+    "{{c0::zero}}", "{{c-1::negative}}", "{{c01::leading zero}}",
+    "{{c1::}}", "{{c1:: \t}}", "{{c1::unclosed}", "{c1::text}}",
+    "{{C1::uppercase}}", "{{cX::letter}}",
+])
+def test_invalid_cloze_syntax_stays_an_ordinary_answer(body):
+    cards = parse_markdown(f"## Note\n{body}\n")
+    assert len(cards) == 1
+    assert cards[0].cloze is None
+    assert cards[0].answer == body
+
+
+def test_clozes_are_only_read_from_the_body_and_can_span_lines():
+    card = parse_markdown("## Literal {{c1::heading}}\nPlain body\n")[0]
+    assert card.cloze is None
+    cards = parse_markdown("## Note\n{{c2::two\nlines}}\n")
+    assert [c.cloze for c in cards] == [2]
+
+
+def test_clozes_take_precedence_over_reverse_marker():
+    cards = parse_markdown("## Note <=>\n{{c1::one}} {{c2::two}}\n")
+    assert [c.cloze for c in cards] == [1, 2]
+    assert all(c.question == "Note" and not c.reverse for c in cards)
+    assert [c.id for c in cards] == [
+        c.id for c in parse_markdown("## Note\n{{c1::one}} {{c2::two}}\n")
+    ]
+
+
+def test_duplicate_cloze_notes_keep_distinct_ids_and_metadata(tmp_path):
+    path = tmp_path / "a.md"
+    note = "## Note\n{{c1::one}} {{c2::two}}\n"
+    path.write_text(note * 2, encoding="utf-8")
+    (tmp_path / "b.md").write_text(note, encoding="utf-8")
+    cards = load_deck(tmp_path)
+    ids = [c.id for c in cards]
+    assert len(set(ids)) == 6
+    assert [c.cloze for c in cards] == [1, 2] * 3
+    path.write_text(note.replace("one", "edited") * 2, encoding="utf-8")
+    assert [c.id for c in load_deck(tmp_path)] == ids
+    assert check_deck(tmp_path) == [
+        "a.md:3: duplicate question 'Note' (first at a.md:1)",
+        "b.md:1: duplicate question 'Note' (first at a.md:1)",
+    ]
+
+
+def test_moving_a_cloze_note_keeps_all_ids(tmp_path):
+    path = tmp_path / "old.md"
+    path.write_text("## Note\n{{c1::one}} {{c2::two}}\n", encoding="utf-8")
+    before = [c.id for c in load_deck(tmp_path)]
+    assert check_deck(tmp_path) == []
+    path.rename(tmp_path / "new.md")
+    assert [c.id for c in load_deck(tmp_path)] == before
