@@ -47,8 +47,9 @@ number, in numeric order. Repeated numbers belong to the same card. For example,
 `{{c1::ATP}} supplies energy; {{c2::DNA}} stores genetic information.` produces
 two cards. Their IDs use the heading and cloze number, so editing the body keeps
 their histories. Clozes take precedence over ` <=>` on the same heading.
-Parsing is supported now; review still displays the original heading and body
-until cloze masking and highlighting are added.
+Review shows the heading and body with every occurrence of the target number
+masked as `[...]`. Revealing the answer highlights those targets in bold teal
+on colour terminals; other clozes appear as plain text on both sides.
 
 ## Run
 

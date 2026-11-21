@@ -5,10 +5,10 @@ import re
 import pytest
 
 from drill.cli import main
-from drill.deck import load_deck
+from drill.deck import load_deck, parse_markdown
 from drill.fsrs import Grade
 from drill.schedule import apply_grade, preview_intervals
-from drill.session import build_queue, render_answer, run_review
+from drill.session import build_queue, render_answer, render_cloze, run_review
 from drill.store import Store
 from drill.term import EOF_KEY, Terminal
 
@@ -33,6 +33,63 @@ def make_deck(tmp_path, n=2):
     body = "".join(f"## Question {i}\nAnswer {i}\n\n" for i in range(1, n + 1))
     (tmp_path / "deck.md").write_text(body, encoding="utf-8")
     return tmp_path
+
+
+@pytest.mark.parametrize("ansi", [False, True])
+def test_cloze_review_masks_repeated_targets_and_reveals_each_number(tmp_path, ansi):
+    (tmp_path / "deck.md").write_text(
+        "## Energy\n{{c1::ATP}} fuels cells; {{c2::DNA}} stores genes.\n"
+        "More {{c1::ATP}}.\n", encoding="utf-8",
+    )
+    term = Fake("b 3 3")
+    term.ansi = ansi
+    screens = []
+    term.clear = lambda: screens.append([])
+    term.write = lambda text: screens[-1].append(text)
+    assert run_review(tmp_path, None, 10, term, TODAY) == 0
+    _, front1, back1, front2, back2, _ = ["".join(s) for s in screens]
+    assert "Energy" in front1
+    assert front1.count("[...]") == 2 and "ATP" not in front1
+    assert "DNA" in front1
+    assert front2.count("[...]") == 1 and "DNA" not in front2
+    assert front2.count("ATP") == 2
+    assert back1.count(term.bold(term.accent("ATP"))) == 2
+    assert term.bold(term.accent("DNA")) in back2
+    assert "{{c" not in front1 + back1 + front2 + back2
+    if ansi:
+        assert term.bold(term.accent("DNA")) not in back1
+        assert term.bold(term.accent("ATP")) not in back2
+    with Store(tmp_path / ".drill.db") as store:
+        assert len(store.states()) == 2
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("width", [10, 30, 120])
+@pytest.mark.parametrize("ansi", [False, True])
+def test_cloze_highlight_survives_wrapping_and_multiline_targets(width, ansi):
+    target = "alpha beta gamma delta\n\nepsilon " + "x" * 90
+    card = parse_markdown("## Note\nBefore {{c1::" + target + "}} after {{c2::plain}}.")[0]
+    term = Fake("", width=width)
+    term.ansi = ansi
+    front = "\n".join(render_cloze(term, card))
+    assert "[...]" in front and "alpha" not in front and "plain" in front
+    back = render_cloze(term, card, revealed=True)
+    plain = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in back]
+    assert all(len(line) <= width for line in plain)
+    assert "".join("".join(plain).split()) == "Before" + "".join(target.split()) + "afterplain."
+    if ansi:
+        highlighted = re.findall(r"\x1b\[1m\x1b\[38;5;109m(.*?)\x1b\[0m", "\n".join(back))
+        assert "".join("".join(highlighted).split()) == "".join(target.split())
+
+
+def test_cloze_practice_masks_the_target_again(tmp_path):
+    (tmp_path / "deck.md").write_text("## Note\n{{c1::answer}}\n", encoding="utf-8")
+    term = Fake("b 1  ")
+    assert run_review(tmp_path, None, 10, term, TODAY) == 0
+    assert term.text.count("[...]") == 2
+    assert "Practice only" in term.text
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 1
 
 
 @pytest.mark.parametrize("keys", ["bs", "b s"])

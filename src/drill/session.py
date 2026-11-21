@@ -13,7 +13,7 @@ from pathlib import Path
 from time import monotonic
 
 from drill.config import deck_settings
-from drill.deck import Card, load_deck
+from drill.deck import _CLOZE, Card, load_deck
 from drill.fsrs import DEFAULT_WEIGHTS, Grade
 from drill.schedule import CardState, apply_grade, preview_intervals
 from drill.store import Store
@@ -143,6 +143,50 @@ def render_answer(term: Terminal, answer: str) -> list[str]:
     return out
 
 
+def render_cloze(term: Terminal, card: Card, *, revealed: bool = False) -> list[str]:
+    margin, width = _layout(term)
+    parts: list[str] = []
+    targets: list[tuple[int, int]] = []
+    end = size = 0
+    source = card.answer.expandtabs()
+    for match in _CLOZE.finditer(source):
+        parts.append(source[end:match.start()])
+        size += len(parts[-1])
+        target = int(match[1]) == card.cloze and bool(match[2].strip())
+        text = "[...]" if target and not revealed else match[2]
+        if not match[2].strip():
+            text = match[0]
+        if target and revealed:
+            targets.append((size, size + len(text)))
+        parts.append(text)
+        size += len(text)
+        end = match.end()
+    parts.append(source[end:])
+
+    out: list[str] = []
+    offset = 0
+    for raw in "".join(parts).splitlines(keepends=True):
+        line = raw.rstrip("\r\n").translate(str.maketrans("\t\v\f", "   "))
+        cursor = 0
+        for wrapped in textwrap.wrap(line, width) or [""]:
+            start = offset + line.index(wrapped, cursor)
+            stop = start + len(wrapped)
+            cursor = stop - offset
+            chunks: list[str] = []
+            position = start
+            # Add ANSI only after wrapping, so highlights never consume columns.
+            for left, right in targets:
+                left, right = max(start, left), min(stop, right)
+                if left < right:
+                    chunks.append(_inline(term, wrapped[position - start:left - start]))
+                    chunks.append(term.bold(term.accent(wrapped[left - start:right - start])))
+                    position = right
+            chunks.append(_inline(term, wrapped[position - start:]))
+            out.append(margin + "".join(chunks))
+        offset += len(raw)
+    return out
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
@@ -213,6 +257,9 @@ def review(
                 position += 1
                 continue
             _screen(term, card, position + 1, len(queue))
+            if card.cloze is not None:
+                for line in render_cloze(term, card):
+                    term.write(line + "\n")
             term.write("\n")
             if practice:
                 _write_text(term, "Practice only - schedule unchanged", dim=True)
@@ -246,7 +293,9 @@ def review(
             margin, width = _layout(term)
             _write_text(term, "-" * min(12, width), dim=True)
             term.write("\n")
-            for line in render_answer(term, card.answer):
+            answer = (render_cloze(term, card, revealed=True) if card.cloze is not None
+                      else render_answer(term, card.answer))
+            for line in answer:
                 term.write(line + "\n")
             if state is not None and state.lapses >= _LEECH_LAPSES:
                 term.write("\n")
