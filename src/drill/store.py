@@ -117,6 +117,24 @@ class Store:
                 counts[day] = counts.get(day, 0) + count
         return counts
 
+    def review_streak(self, today: date) -> int:
+        rows = self.db.execute(
+            "SELECT DISTINCT date(reviewed_at, 'localtime') AS day FROM reviews"
+            " WHERE day <= ? ORDER BY day DESC", (today.isoformat(),),
+        )
+        streak = 0
+        offset = 0
+        for row in rows:
+            days_ago = (today - date.fromisoformat(row["day"])).days
+            if streak == 0:
+                offset = days_ago
+                if offset > 1:
+                    break
+            if days_ago != streak + offset:
+                break
+            streak += 1
+        return streak
+
     def record(
         self,
         prev: CardState | None,

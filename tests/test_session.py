@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 import re
 
 import pytest
@@ -33,6 +33,64 @@ def make_deck(tmp_path, n=2):
     body = "".join(f"## Question {i}\nAnswer {i}\n\n" for i in range(1, n + 1))
     (tmp_path / "deck.md").write_text(body, encoding="utf-8")
     return tmp_path
+
+
+@pytest.mark.parametrize("keys, expected_rate, elapsed", [
+    ("q", "n/a", "0m 0s"),
+    ("b 1 3  ", "50.0%", "1m 5s"),
+    ("b 1u 3 3", "0.0%", "1m 5s"),
+    ("b 1uq", "n/a", "1m 5s"),
+    ("b 1q", "100.0%", "1m 5s"),
+])
+def test_summary_time_and_again_rate(tmp_path, monkeypatch, keys, expected_rate, elapsed):
+    make_deck(tmp_path)
+    clock = iter([50.0, 115.9])
+    monkeypatch.setattr("drill.session.monotonic", lambda: next(clock))
+    term = Fake(keys)
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert f"Time: {elapsed}" in term.text
+    assert f"Again-rate: {expected_rate}" in term.text
+    if keys == "q":
+        assert next(clock) == 50.0
+
+
+def test_interrupted_summary_keeps_time_and_grades(tmp_path, monkeypatch):
+    make_deck(tmp_path)
+    clock = iter([10.0, 70.0])
+    monkeypatch.setattr("drill.session.monotonic", lambda: next(clock))
+    term = Fake("b 1")
+
+    def read_key():
+        key = term._next_key()
+        if key == EOF_KEY:
+            raise KeyboardInterrupt
+        return key
+
+    term.read_key = read_key
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert "Stopped. 1 card reviewed." in term.text
+    assert "Time: 1m 0s" in term.text
+    assert "Again-rate: 100.0%" in term.text
+
+
+def test_summary_streak_uses_configured_database_and_other_decks(tmp_path, monkeypatch):
+    make_deck(tmp_path, 1)
+    path = tmp_path / "shared.sqlite"
+    with Store(path) as store:
+        day = TODAY - timedelta(days=1)
+        state = apply_grade(None, "removed", "other", Grade.GOOD, day)
+        store.record(None, state, Grade.GOOD, datetime.combine(day, time(12)).astimezone())
+    original_record = Store.record
+
+    def record_today(self, prev, new, grade):
+        original_record(self, prev, new, grade,
+                        datetime.combine(TODAY, time(12)).astimezone())
+
+    monkeypatch.setattr(Store, "record", record_today)
+    term = Fake("b 3")
+    run_review(tmp_path, path, 10, term, TODAY)
+    assert "Streak: 2 days" in term.text
+    assert not (tmp_path / ".drill.db").exists()
 
 
 def test_queue_puts_due_first_then_limited_new(tmp_path):

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from fnmatch import fnmatchcase
 from pathlib import Path
+from time import monotonic
 
 from drill.config import deck_settings
 from drill.deck import Card, load_deck
@@ -33,6 +34,7 @@ class Summary:
     reviewed: int = 0
     counts: dict[Grade, int] = field(default_factory=dict)
     finished: bool = True
+    elapsed_seconds: float = 0.0
 
 
 def build_queue(
@@ -182,6 +184,7 @@ def review(
     summary = Summary()
     queue = list(queue)
     scheduled_count = len(queue)
+    started = None
     try:
         states = store.states()
         due = sum(card.id in states for card in queue)
@@ -194,6 +197,7 @@ def review(
         if term.read_key() in _QUIT:
             summary.finished = False
             return summary
+        started = monotonic()
         position = 0
         last_grade = None
         while position < len(queue):
@@ -276,6 +280,9 @@ def review(
             position += 1
     except KeyboardInterrupt:
         summary.finished = False
+    finally:
+        if started is not None:
+            summary.elapsed_seconds = monotonic() - started
     return summary
 
 
@@ -337,6 +344,12 @@ def run_review(
         if summary.counts:
             parts = [f"{summary.counts[g]} {g.name.lower()}" for g in Grade if g in summary.counts]
             _write_text(term, ", ".join(parts), dim=True)
+        minutes, seconds = divmod(int(summary.elapsed_seconds), 60)
+        again_rate = (f"{summary.counts.get(Grade.AGAIN, 0) / summary.reviewed:.1%}"
+                      if summary.reviewed else "n/a")
+        _write_text(term, f"Time: {minutes}m {seconds}s", dim=True)
+        _write_text(term, f"Again-rate: {again_rate}", dim=True)
+        _write_text(term, f"Streak: {_plural(store.review_streak(today), 'day')}", dim=True)
         states = store.states()
         # Retained grades cover the queue prefix; practice repeats add no grades.
         leeches = {c.id for c in queue[:summary.reviewed]

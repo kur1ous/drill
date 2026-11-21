@@ -1,6 +1,6 @@
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from threading import Event
 
 import pytest
@@ -11,6 +11,32 @@ from drill.store import Store
 
 DAY1 = date(2026, 3, 1)
 DAY2 = date(2026, 3, 5)
+
+
+@pytest.mark.parametrize("offsets, expected", [
+    ([], 0), ([0, 0], 1), ([0, 1, 2, 4], 3),
+    ([1, 2, 3], 3), ([2, 3], 0), ([-1, 0, 1], 2),
+])
+def test_review_streak_counts_consecutive_local_days(tmp_path, offsets, expected):
+    with Store(tmp_path / "s.db") as store:
+        for i, offset in enumerate(offsets):
+            day = DAY1 - timedelta(days=offset)
+            state = apply_grade(None, str(i), "deck", Grade.GOOD, day)
+            when = datetime.combine(day, time(0, 30)).astimezone().astimezone(timezone.utc)
+            store.record(None, state, Grade.GOOD, when)
+        assert store.review_streak(DAY1) == expected
+
+
+def test_review_streak_recalculates_after_undo(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        for offset in [2, 0]:
+            day = DAY1 - timedelta(days=offset)
+            state = apply_grade(None, str(offset), "deck", Grade.AGAIN, day)
+            store.record(None, state, Grade.AGAIN,
+                         datetime.combine(day, time(12)).astimezone())
+        assert store.review_streak(DAY1) == 1
+        assert store.undo()
+        assert store.review_streak(DAY1) == 0
 
 
 def test_new_store_has_no_cards(tmp_path):
