@@ -399,7 +399,7 @@ def test_markdown_directory_is_not_read_as_a_deck(deck_file, capsys, command, ne
         assert states[0].deck == ("chapter.md/notes" if nested else "notes")
 
 
-@pytest.mark.parametrize("command", ["review", "check", "stats", "forecast"])
+@pytest.mark.parametrize("command", ["review", "check", "stats", "forecast", "cards"])
 def test_non_utf8_deck_reports_file(deck_file, capsys, command):
     deck_file.write_bytes(b"## Question\n\xff\n")
     assert main([command, str(deck_file.parent)]) == 2
@@ -410,7 +410,7 @@ def test_non_utf8_deck_reports_file(deck_file, capsys, command):
     assert not (deck_file.parent / ".drill.db").exists()
 
 
-@pytest.mark.parametrize("command", ["review", "check", "stats", "forecast"])
+@pytest.mark.parametrize("command", ["review", "check", "stats", "forecast", "cards"])
 def test_unreadable_deck_reports_file(deck_file, monkeypatch, capsys, command):
     read_text = Path.read_text
 
@@ -458,7 +458,7 @@ def test_check_requires_a_directory(tmp_path, capsys, existing_file):
 
 
 @pytest.mark.parametrize("custom_db", [False, True])
-@pytest.mark.parametrize("command", ["review", "stats", "forecast"])
+@pytest.mark.parametrize("command", ["review", "stats", "forecast", "cards"])
 def test_corrupt_database_reports_file(deck_file, capsys, custom_db, command):
     path = deck_file.parent / ("history.sqlite" if custom_db else ".drill.db")
     path.write_bytes(b"not a sqlite database")
@@ -474,7 +474,7 @@ def test_corrupt_database_reports_file(deck_file, capsys, custom_db, command):
 
 
 @pytest.mark.parametrize("lock", ["EXCLUSIVE", "IMMEDIATE"])
-@pytest.mark.parametrize("command", ["review", "stats", "forecast"])
+@pytest.mark.parametrize("command", ["review", "stats", "forecast", "cards"])
 def test_locked_database_reports_file(deck_file, monkeypatch, capsys, lock, command):
     path = deck_file.parent / "history.sqlite"
     Store(path).close()
@@ -522,7 +522,7 @@ def test_interrupt_during_queue_or_summary_closes_database(
 
 
 @pytest.mark.parametrize("custom_db", [False, True])
-@pytest.mark.parametrize("command", ["review", "stats", "forecast"])
+@pytest.mark.parametrize("command", ["review", "stats", "forecast", "cards"])
 def test_unsupported_database_version_reports_file(deck_file, capsys, custom_db, command):
     path = deck_file.parent / ("history.sqlite" if custom_db else ".drill.db")
     with Store(path) as store:

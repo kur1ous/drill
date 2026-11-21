@@ -6,6 +6,34 @@ from drill.store import Store
 from drill.term import Terminal, system_terminal
 
 
+def print_cards(folder: Path, db_path: Path, today: date, *, due_only: bool = False) -> None:
+    cards = load_deck(folder)
+    with Store(db_path) as store:
+        states = store.states()
+    rows = []
+    for card in cards:
+        state = states.get(card.id)
+        if due_only and (state is None or state.due > today):
+            continue
+        rows.append((
+            " ".join(card.deck.split()),
+            state.due.isoformat() if state else "new",
+            f"{state.stability:.2f}" if state else "-",
+            str(state.lapses) if state else "0",
+            " ".join(card.question.split()),
+        ))
+    if not rows:
+        print("No due cards." if due_only else "No cards found.")
+        return
+    header = ("Deck", "Due", "Stability (days)", "Lapses", "Question")
+    widths = [max(len(row[i]) for row in [header, *rows]) for i in range(4)]
+    for row in [header, *rows]:
+        print("  ".join(
+            value.rjust(width) if i in (2, 3) else value.ljust(width)
+            for i, (value, width) in enumerate(zip(row, widths))
+        ) + "  " + row[4])
+
+
 def forecast_bars(counts: dict[date, int], terminal: Terminal) -> str:
     terminal.refresh_width()
     peak = max(counts.values(), default=0)

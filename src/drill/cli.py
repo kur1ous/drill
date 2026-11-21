@@ -32,6 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
     forecast.add_argument("dir", type=Path, help="folder of markdown decks")
     forecast.add_argument("--db", type=Path, metavar="FILE", help="review history file")
 
+    cards = sub.add_parser("cards", help="list cards and their schedules")
+    cards.add_argument("dir", type=Path, help="folder of markdown decks")
+    cards.add_argument("--due", action="store_true", help="only scheduled cards due today or overdue")
+    cards.add_argument("--db", type=Path, metavar="FILE", help="review history file")
+
     review = sub.add_parser("review", help="review the cards that are due")
     review.add_argument("dir", type=Path, help="folder of markdown decks or a .md file")
     review.add_argument(
@@ -96,8 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         if not issues:
             print("No issues found.")
         return int(bool(issues))
-    if args.command in ("stats", "forecast"):
-        from drill.stats import print_forecast, print_stats
+    if args.command in ("stats", "forecast", "cards"):
+        from drill.stats import print_cards, print_forecast, print_stats
         from drill.store import UnsupportedSchemaError
 
         if not args.dir.is_dir():
@@ -110,8 +115,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         db_path = args.db if args.db is not None else settings.get("db", args.dir / ".drill.db")
         try:
-            report = print_stats if args.command == "stats" else print_forecast
-            report(args.dir, db_path, date.today())
+            if args.command == "cards":
+                print_cards(args.dir, db_path, date.today(), due_only=args.due)
+            else:
+                report = print_stats if args.command == "stats" else print_forecast
+                report(args.dir, db_path, date.today())
             return 0
         except (DeckReadError, UnsupportedSchemaError) as exc:
             print(f"drill: {exc}", file=sys.stderr)

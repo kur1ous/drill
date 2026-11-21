@@ -108,6 +108,12 @@ The chart uses current due dates; it does not predict future grades or repeat
 reviews. Bars scale to fit the terminal; each row includes its exact count.
 Forecast uses the configured database, or `--db FILE` to override it.
 
+Run `drill cards notes/` to list each card's deck, due date, stability in days,
+lapses and question in columns, in file order. New cards show `new` for due and
+`-` for stability. Add `--due` to show only scheduled cards due today or overdue,
+excluding new cards. Removed cards are excluded. The listing uses the configured
+database, or `--db FILE` to override it, and leaves review history unchanged.
+
 ## Where review history lives
 
 Put review defaults in `.drill.toml` in the deck folder (the parent when reviewing
