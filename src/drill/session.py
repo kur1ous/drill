@@ -271,7 +271,7 @@ def review(
             grade = _GRADE_KEYS[key]
             store.record(state, apply_grade(
                 state, card.id, card.deck, grade, today, card_retention, weights,
-            ), grade)
+            ), grade, question=card.question)
             summary.reviewed += 1
             summary.counts[grade] = summary.counts.get(grade, 0) + 1
             if grade == Grade.AGAIN:

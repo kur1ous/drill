@@ -82,9 +82,9 @@ def test_summary_streak_uses_configured_database_and_other_decks(tmp_path, monke
         store.record(None, state, Grade.GOOD, datetime.combine(day, time(12)).astimezone())
     original_record = Store.record
 
-    def record_today(self, prev, new, grade):
+    def record_today(self, prev, new, grade, **kwargs):
         original_record(self, prev, new, grade,
-                        datetime.combine(TODAY, time(12)).astimezone())
+                        datetime.combine(TODAY, time(12)).astimezone(), **kwargs)
 
     monkeypatch.setattr(Store, "record", record_today)
     term = Fake("b 3")
@@ -537,10 +537,16 @@ def test_empty_folder_is_reported(tmp_path):
 def test_review_state_follows_a_reworded_question(tmp_path):
     make_deck(tmp_path, 1)
     run_review(tmp_path, None, 10, Fake("b 3"), TODAY)
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.db.execute("SELECT question FROM cards").fetchone()[0] == "Question 1"
     (tmp_path / "deck.md").write_text("## question 1?\nA better, longer answer.\n", encoding="utf-8")
     term = Fake("")
     run_review(tmp_path, None, 10, term, TODAY)
     assert "Nothing due." in term.text  # still remembered, not treated as a new card
+    run_review(tmp_path, None, 10, Fake("b 3"), TODAY + timedelta(days=30))
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.db.execute("SELECT question FROM cards").fetchone()[0] == "question 1?"
+        assert next(iter(store.states().values())).reps == 2
 
 
 def test_render_answer_wraps_prose_and_keeps_code():

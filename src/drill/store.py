@@ -13,14 +13,14 @@ from pathlib import Path
 from drill.fsrs import Grade
 from drill.schedule import CardState
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class UnsupportedSchemaError(RuntimeError):
     pass
 
 
-_SCHEMA = """
+_MIGRATIONS = {1: """
 CREATE TABLE cards (
     id          TEXT PRIMARY KEY,
     deck        TEXT NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE reviews (
     scheduled_days  INTEGER NOT NULL
 );
 CREATE INDEX reviews_card ON reviews (card_id, id);
-"""
+""", 2: "ALTER TABLE cards ADD COLUMN question TEXT NOT NULL DEFAULT '';"}
 
 
 class Store:
@@ -53,18 +53,18 @@ class Store:
         try:
             self.db.row_factory = sqlite3.Row
             with self.db:
-                # Serialize first-time setup and roll it back if interrupted.
+                # Serialize migrations and roll them back together if interrupted.
                 self.db.execute("BEGIN IMMEDIATE")
                 version = self.db.execute("PRAGMA user_version").fetchone()[0]
-                if version == 0:
-                    for statement in _SCHEMA.split(";"):
-                        if statement.strip():
-                            self.db.execute(statement)
-                    self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-                elif version != SCHEMA_VERSION:
+                if not 0 <= version <= SCHEMA_VERSION:
                     raise UnsupportedSchemaError(
                         f"{self.path} has schema version {version}, this drill expects {SCHEMA_VERSION}"
                     )
+                for target in range(version + 1, SCHEMA_VERSION + 1):
+                    for statement in _MIGRATIONS[target].split(";"):
+                        if statement.strip():
+                            self.db.execute(statement)
+                    self.db.execute(f"PRAGMA user_version = {target}")
         except BaseException:
             self.db.close()
             raise
@@ -141,12 +141,15 @@ class Store:
         new: CardState,
         grade: Grade,
         when: datetime | None = None,
+        *, question: str | None = None,
     ) -> None:
         """Save the new state and log the review in one transaction."""
         when = when or datetime.now(timezone.utc)
         elapsed = (new.last_review - prev.last_review).days if prev else 0
         with self.db:
             self._save(new)
+            if question is not None:
+                self.db.execute("UPDATE cards SET question = ? WHERE id = ?", (question, new.id))
             row = self.db.execute(
                 "INSERT INTO reviews (card_id, reviewed_at, grade, elapsed_days, scheduled_days)"
                 " VALUES (?,?,?,?,?)",
@@ -178,7 +181,11 @@ class Store:
 
     def _save(self, state: CardState) -> None:
         self.db.execute(
-            "INSERT OR REPLACE INTO cards VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO cards (id, deck, stability, difficulty, due, last_review,"
+            " introduced, reps, lapses) VALUES (?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(id) DO UPDATE SET deck=excluded.deck, stability=excluded.stability,"
+            " difficulty=excluded.difficulty, due=excluded.due, last_review=excluded.last_review,"
+            " introduced=excluded.introduced, reps=excluded.reps, lapses=excluded.lapses",
             (
                 state.id, state.deck, state.stability, state.difficulty,
                 state.due.isoformat(), state.last_review.isoformat(),

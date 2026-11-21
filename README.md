@@ -200,6 +200,8 @@ emphasis and a trailing `?`. So you can rewrite an answer, move a card to anothe
 file or tidy the question's wording without losing its history. Changing the
 question in a way that matters (`a^2` to `a_2`, a different noun) makes a new
 card. If two cards share a question, each still gets its own history.
+Database schemas upgrade automatically when opened. Each graded review saves
+the current question as a snapshot; older cards get one on their next review.
 
 ## Tests
 

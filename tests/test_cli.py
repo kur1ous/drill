@@ -537,7 +537,7 @@ def test_unsupported_database_version_reports_file(deck_file, capsys, custom_db,
     error = capsys.readouterr().err
     assert str(path) in error
     assert "schema version 99" in error
-    assert "expects 1" in error
+    assert "expects 2" in error
     assert "Traceback" not in error
     assert path.read_bytes() == original
 

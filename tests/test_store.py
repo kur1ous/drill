@@ -13,6 +13,103 @@ DAY1 = date(2026, 3, 1)
 DAY2 = date(2026, 3, 5)
 
 
+def version_one_database(path):
+    db = sqlite3.connect(path)
+    db.executescript("""
+        CREATE TABLE cards (
+            id TEXT PRIMARY KEY, deck TEXT NOT NULL, stability REAL NOT NULL,
+            difficulty REAL NOT NULL, due TEXT NOT NULL, last_review TEXT NOT NULL,
+            introduced TEXT NOT NULL, reps INTEGER NOT NULL, lapses INTEGER NOT NULL
+        );
+        CREATE INDEX cards_due ON cards (due);
+        CREATE TABLE reviews (
+            id INTEGER PRIMARY KEY, card_id TEXT NOT NULL, reviewed_at TEXT NOT NULL,
+            grade INTEGER NOT NULL, elapsed_days INTEGER NOT NULL, scheduled_days INTEGER NOT NULL
+        );
+        CREATE INDEX reviews_card ON reviews (card_id, id);
+        INSERT INTO cards VALUES ('abc', 'bio', 4, 5, '2026-03-05', '2026-03-01', '2026-03-01', 1, 0);
+        INSERT INTO reviews VALUES (1, 'abc', '2026-03-01T12:00:00+00:00', 3, 0, 4);
+        PRAGMA user_version = 1;
+    """)
+    db.close()
+
+
+def test_version_one_upgrade_preserves_history_and_runs_once(tmp_path):
+    path = tmp_path / "s.db"
+    version_one_database(path)
+    db = sqlite3.connect(path)
+    before = db.execute("SELECT * FROM cards").fetchone()
+    reviews = db.execute("SELECT * FROM reviews").fetchall()
+    db.close()
+    for _ in range(2):
+        with Store(path) as store:
+            assert store.db.execute("PRAGMA user_version").fetchone()[0] == 2
+            assert tuple(store.db.execute("SELECT * FROM cards").fetchone()) == (*before, "")
+            assert [tuple(r) for r in store.db.execute("SELECT * FROM reviews")] == reviews
+            indexes = {r[0] for r in store.db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+            assert {"cards_due", "reviews_card"} <= indexes
+            assert store.get("abc").due == DAY2
+
+
+@pytest.mark.parametrize("version", [0, 1])
+@pytest.mark.parametrize("fail_after", ["ALTER TABLE", "PRAGMA user_version = 2"])
+def test_failed_migration_rolls_back_schema_and_version(tmp_path, monkeypatch, version, fail_after):
+    class FailingConnection(sqlite3.Connection):
+        def execute(self, sql, *args):
+            result = super().execute(sql, *args)
+            if fail_after in sql:
+                raise sqlite3.OperationalError("migration interrupted")
+            return result
+
+    path = tmp_path / "s.db"
+    if version:
+        version_one_database(path)
+    connection = sqlite3.connect(path, factory=FailingConnection)
+    before = list(connection.iterdump())
+    with monkeypatch.context() as patch:
+        patch.setattr("drill.store.sqlite3.connect", lambda path, **kwargs: connection)
+        with pytest.raises(sqlite3.OperationalError, match="migration interrupted"):
+            Store(path)
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1")
+    db = sqlite3.connect(path)
+    assert db.execute("PRAGMA user_version").fetchone()[0] == version
+    assert list(db.iterdump()) == before
+    db.close()
+    with Store(path) as store:
+        assert store.db.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+def test_question_snapshot_survives_reopen_regrade_and_undo(tmp_path):
+    path = tmp_path / "s.db"
+    first = apply_grade(None, "abc", "bio", Grade.GOOD, DAY1)
+    second = apply_grade(first, "abc", "bio", Grade.HARD, DAY2)
+    with Store(path) as store:
+        store.record(None, first, Grade.GOOD, question="What's β?")
+    with Store(path) as store:
+        assert store.db.execute("SELECT question FROM cards").fetchone()[0] == "What's β?"
+        store.record(first, second, Grade.HARD, question="What's **β**?")
+        assert store.undo()
+        assert store.get("abc") == first
+        assert store.db.execute("SELECT question FROM cards").fetchone()[0] == "What's **β**?"
+        store.record(first, second, Grade.HARD)
+        assert store.db.execute("SELECT question FROM cards").fetchone()[0] == "What's **β**?"
+
+
+def test_failed_review_rolls_back_question_snapshot(tmp_path):
+    first = apply_grade(None, "abc", "bio", Grade.GOOD, DAY1)
+    second = apply_grade(first, "abc", "bio", Grade.HARD, DAY2)
+    with Store(tmp_path / "s.db") as store:
+        store.record(None, first, Grade.GOOD, question="Old?")
+        store.db.execute("CREATE TRIGGER reject_review BEFORE INSERT ON reviews "
+                         "BEGIN SELECT RAISE(ABORT, 'review failed'); END")
+        with pytest.raises(sqlite3.IntegrityError, match="review failed"):
+            store.record(first, second, Grade.HARD, question="New?")
+        assert store.get("abc") == first
+        assert store.db.execute("SELECT question FROM cards").fetchone()[0] == "Old?"
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 1
+
+
 @pytest.mark.parametrize("offsets, expected", [
     ([], 0), ([0, 0], 1), ([0, 1, 2, 4], 3),
     ([1, 2, 3], 3), ([2, 3], 0), ([-1, 0, 1], 2),
@@ -231,7 +328,7 @@ def test_interrupted_setup_closes_and_rolls_back(tmp_path, monkeypatch):
         connection.execute("SELECT 1")
     with Store(path) as store:
         assert store.states() == {}
-        assert store.db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert store.db.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_interrupted_grade_rolls_back_and_releases_lock(tmp_path, monkeypatch):
