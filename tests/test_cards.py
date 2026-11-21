@@ -11,6 +11,32 @@ from drill.schedule import apply_grade
 from drill.store import Store
 
 
+def test_suspended_cards_are_listed_but_not_due_or_forecast(tmp_path, capsys):
+    (tmp_path / "notes.md").write_text("## New\nA\n## Old\nB\n", encoding="utf-8")
+    cards = load_deck(tmp_path)
+    today = date.today()
+    with Store(tmp_path / ".drill.db") as store:
+        old = apply_grade(None, cards[1].id, "notes", Grade.GOOD, today - timedelta(days=20))
+        store.record(None, old, Grade.GOOD)
+        for card in cards:
+            store.suspend(card.id, card.deck, card.question, today)
+    assert main(["cards", str(tmp_path)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert re.split(r" {2,}", lines[1]) == ["notes", "suspended", "-", "0", "New"]
+    assert re.split(r" {2,}", lines[2]) == ["notes", "suspended", f"{old.stability:.2f}", "0", "Old"]
+    assert main(["cards", str(tmp_path), "--due"]) == 0
+    assert capsys.readouterr().out == "No due cards.\n"
+    assert main(["stats", str(tmp_path)]) == 0
+    output = capsys.readouterr().out
+    assert "  suspended: 2\n" in output
+    assert "  learning: 0\n  young: 0\n  mature: 0\n" in output
+    assert "Due today (including overdue): 0" in output
+    assert main(["forecast", str(tmp_path)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "Overdue: 0"
+    assert all(row.split()[1:] == ["0"] for row in lines[3:])
+
+
 @pytest.mark.parametrize("due_only", [False, True])
 def test_cards_empty_deck(tmp_path, capsys, due_only):
     args = ["cards", str(tmp_path)] + (["--due"] if due_only else [])

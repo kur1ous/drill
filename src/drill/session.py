@@ -35,6 +35,7 @@ class Summary:
     counts: dict[Grade, int] = field(default_factory=dict)
     finished: bool = True
     elapsed_seconds: float = 0.0
+    reviewed_ids: set[str] = field(default_factory=set)
 
 
 def build_queue(
@@ -48,12 +49,13 @@ def build_queue(
     """Order due cards and the new cards admitted by today's allowance."""
     if order not in {"due", "random", "deck"}:
         raise ValueError(f"unknown review order: {order}")
-    due = [c for c in cards if c.id in states and states[c.id].due <= today]
+    due = [c for c in cards if c.id in states and not states[c.id].suspended
+           and states[c.id].due <= today]
     due.sort(key=lambda c: (states[c.id].due, c.deck, c.line))
     fresh = [c for c in cards if c.id not in states]
     deck_limits = deck_limits or {}
     introduced = Counter(s.deck for s in states.values()
-                         if s.introduced == today and s.deck in deck_limits)
+                         if s.reps > 0 and s.introduced == today and s.deck in deck_limits)
     remaining = {deck: max(0, count - introduced[deck])
                  for deck, count in deck_limits.items()}
     shared_today = max(0, new_today - sum(introduced.values()))
@@ -75,7 +77,8 @@ def next_due(
     states: dict[str, CardState], live_ids: set[str], today: date
 ) -> tuple[date, int] | None:
     """Earliest future due date among cards still in the deck, and how many fall on it."""
-    future = sorted(s.due for i, s in states.items() if i in live_ids and s.due > today)
+    future = sorted(s.due for i, s in states.items()
+                    if i in live_ids and not s.suspended and s.due > today)
     return (future[0], future.count(future[0])) if future else None
 
 
@@ -205,21 +208,26 @@ def review(
             card_retention = (deck_retentions or {}).get(card.deck, retention)
             practice = position >= scheduled_count
             state = store.get(card.id)
+            if state is not None and state.suspended:
+                last_grade = None
+                position += 1
+                continue
             _screen(term, card, position + 1, len(queue))
             term.write("\n")
             if practice:
                 _write_text(term, "Practice only - schedule unchanged", dim=True)
-            _write_text(term, "space to show the answer   q to stop", dim=True)
+            _write_text(term, "space to show the answer   s to suspend   q to stop", dim=True)
             undo_keys = {"u"} if last_grade is not None else set()
             if undo_keys:
                 _write_text(term, "u to undo the last grade", dim=True)
-            key = _ask(term, _REVEAL | undo_keys)
+            key = _ask(term, _REVEAL | undo_keys | {"s"})
             if key is None:
                 summary.finished = False
                 break
             if key == "u":
                 if store.undo():
                     summary.reviewed -= 1
+                    summary.reviewed_ids.discard(queue[position - 1].id)
                     summary.counts[last_grade] -= 1
                     if summary.counts[last_grade] == 0:
                         del summary.counts[last_grade]
@@ -227,6 +235,11 @@ def review(
                         queue.pop()
                     position -= 1
                 last_grade = None
+                continue
+            if key == "s":
+                store.suspend(card.id, card.deck, card.question, today)
+                last_grade = None
+                position += 1
                 continue
 
             _screen(term, card, position + 1, len(queue))
@@ -241,10 +254,13 @@ def review(
             if practice:
                 term.write("\n")
                 _write_text(term, "Practice only - schedule unchanged", dim=True)
-                _write_text(term, "space to continue   q to stop", dim=True)
-                if _ask(term, _REVEAL) is None:
+                _write_text(term, "space to continue   s to suspend   q to stop", dim=True)
+                key = _ask(term, _REVEAL | {"s"})
+                if key is None:
                     summary.finished = False
                     break
+                if key == "s":
+                    store.suspend(card.id, card.deck, card.question, today)
                 last_grade = None
                 position += 1
                 continue
@@ -263,16 +279,23 @@ def review(
                         term.write(margin + label + "\n")
                     else:
                         _write_text(term, text)
-            key = _ask(term, set(_GRADE_KEYS))
+            _write_text(term, "s to suspend   q to stop", dim=True)
+            key = _ask(term, set(_GRADE_KEYS) | {"s"})
             if key is None:
                 summary.finished = False
                 break
+            if key == "s":
+                store.suspend(card.id, card.deck, card.question, today)
+                last_grade = None
+                position += 1
+                continue
 
             grade = _GRADE_KEYS[key]
             store.record(state, apply_grade(
                 state, card.id, card.deck, grade, today, card_retention, weights,
             ), grade, question=card.question)
             summary.reviewed += 1
+            summary.reviewed_ids.add(card.id)
             summary.counts[grade] = summary.counts.get(grade, 0) + 1
             if grade == Grade.AGAIN:
                 queue.append(card)
@@ -351,9 +374,8 @@ def run_review(
         _write_text(term, f"Again-rate: {again_rate}", dim=True)
         _write_text(term, f"Streak: {_plural(store.review_streak(today), 'day')}", dim=True)
         states = store.states()
-        # Retained grades cover the queue prefix; practice repeats add no grades.
-        leeches = {c.id for c in queue[:summary.reviewed]
-                   if c.id in states and states[c.id].lapses >= _LEECH_LAPSES}
+        leeches = {card_id for card_id in summary.reviewed_ids
+                   if card_id in states and states[card_id].lapses >= _LEECH_LAPSES}
         if leeches:
             label = "leech" if len(leeches) == 1 else "leeches"
             _write_text(term, f"{len(leeches)} {label} reviewed (8+ lapses); consider rewriting.", dim=True)

@@ -13,12 +13,12 @@ def print_cards(folder: Path, db_path: Path, today: date, *, due_only: bool = Fa
     rows = []
     for card in cards:
         state = states.get(card.id)
-        if due_only and (state is None or state.due > today):
+        if due_only and (state is None or state.suspended or state.due > today):
             continue
         rows.append((
             " ".join(card.deck.split()),
-            state.due.isoformat() if state else "new",
-            f"{state.stability:.2f}" if state else "-",
+            "suspended" if state and state.suspended else state.due.isoformat() if state else "new",
+            f"{state.stability:.2f}" if state and state.reps else "-",
             str(state.lapses) if state else "0",
             " ".join(card.question.split()),
         ))
@@ -56,7 +56,7 @@ def print_forecast(folder: Path, db_path: Path, today: date) -> None:
         states = store.states()
         for card in cards:
             state = states.get(card.id)
-            if state is None:
+            if state is None or state.suspended:
                 continue
             if state.due < today:
                 overdue += 1
@@ -95,6 +95,9 @@ def print_stats(folder: Path, db_path: Path, today: date) -> None:
         states = store.states()
         for card in cards:
             state = states.get(card.id)
+            if state is not None and state.suspended:
+                counts["suspended"] = counts.get("suspended", 0) + 1
+                continue
             if state is None:
                 counts["new"] += 1
                 continue

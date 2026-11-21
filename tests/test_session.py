@@ -35,6 +35,63 @@ def make_deck(tmp_path, n=2):
     return tmp_path
 
 
+@pytest.mark.parametrize("keys", ["bs", "b s"])
+@pytest.mark.parametrize("deck_rules", [None, {"deck": {"new_per_day": 1}}])
+def test_suspend_new_card_persists_without_review_or_allowance(tmp_path, keys, deck_rules):
+    make_deck(tmp_path)
+    term = Fake(keys)
+    run_review(tmp_path, None, 1, term, TODAY, deck_rules=deck_rules)
+    assert "Done. 0 cards reviewed." in term.text
+    with Store(tmp_path / ".drill.db") as store:
+        state = store.get(load_deck(tmp_path)[0].id)
+        assert state.suspended and state.reps == 0
+        assert store.new_introduced_on(TODAY) == 0
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 0
+        assert store.db.execute("SELECT question FROM cards").fetchone()[0] == "Question 1"
+    term = Fake("b 3")
+    run_review(tmp_path, None, 1, term, TODAY, deck_rules=deck_rules)
+    assert "0 due, 1 new" in term.text and "Question 1" not in term.text
+    assert "Done. 1 card reviewed." in term.text
+
+
+@pytest.mark.parametrize("keys", ["bs", "b s", "b 1s", "b 1 s"])
+def test_suspend_due_or_practice_card_preserves_schedule(tmp_path, keys):
+    make_deck(tmp_path, 1)
+    card = load_deck(tmp_path)[0]
+    old = apply_grade(None, card.id, card.deck, Grade.GOOD, TODAY - timedelta(days=20))
+    with Store(tmp_path / ".drill.db") as store:
+        store.record(None, old, Grade.GOOD)
+    term = Fake(keys)
+    run_review(tmp_path, None, 10, term, TODAY)
+    expected = apply_grade(old, card.id, card.deck, Grade.AGAIN, TODAY) if "1" in keys else old
+    with Store(tmp_path / ".drill.db") as store:
+        assert store.get(card.id) == replace(expected, suspended=True)
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == (2 if "1" in keys else 1)
+    term = Fake("")
+    run_review(tmp_path, None, 10, term, TODAY + timedelta(days=30))
+    assert "Nothing due." in term.text and "Next:" not in term.text
+    # A suspended future schedule must not appear in the next-due hint either.
+    term = Fake("")
+    run_review(tmp_path, None, 10, term, TODAY - timedelta(days=30))
+    assert "Next:" not in term.text
+
+
+def test_suspension_ends_undo_and_leech_summary_counts_graded_cards(tmp_path):
+    make_deck(tmp_path, 3)
+    cards = load_deck(tmp_path)
+    with Store(tmp_path / ".drill.db") as store:
+        for card in cards:
+            state = apply_grade(None, card.id, card.deck, Grade.GOOD, TODAY - timedelta(days=20))
+            store.record(None, replace(state, lapses=8, due=TODAY), Grade.GOOD)
+    term = Fake("b 3su 3")
+    run_review(tmp_path, None, 10, term, TODAY)
+    assert "Done. 2 cards reviewed." in term.text
+    assert "2 leeches reviewed" in term.text
+    with Store(tmp_path / ".drill.db") as store:
+        assert [store.get(c.id).reps for c in cards] == [2, 1, 2]
+        assert store.get(cards[1].id).suspended
+
+
 @pytest.mark.parametrize("keys, expected_rate, elapsed", [
     ("q", "n/a", "0m 0s"),
     ("b 1 3  ", "50.0%", "1m 5s"),

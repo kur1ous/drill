@@ -51,6 +51,9 @@ The variation is seeded by card ID and review count; displayed intervals match
 the saved schedule, including after undoing and repeating a grade.
 On the next question, press `u` before revealing the answer to undo the last grade
 and return to that card. Undo restores its schedule and removes that review.
+Press `s` on either side of a card to suspend it, including during practice.
+Suspension skips future reviews without adding a grade or using a new-card allowance.
+It ends the opportunity to undo the previous grade; existing review history is kept.
 Cards graded again return once at the end for practice: space reveals the answer,
 then space continues. Practice does not change schedules, history or review counts.
 Cards with eight or more lapses show a leech note on the answer screen, suggesting
@@ -95,7 +98,8 @@ untouched and exits with code 0 for no issues, 1 for findings, or 2 for read err
 
 Run `drill stats notes/` for counts of new, learning (scheduled interval at most
 one day), young (2-20 days), and mature (at least 21 days) cards. Due today includes
-overdue cards, excluding new cards. Retention is the all-time fraction graded
+overdue cards, excluding new and suspended cards. Suspended cards have their own
+count. Retention is the all-time fraction graded
 hard, good or easy among logged reviews with at least one day elapsed; first
 introductions and same-day reviews are excluded. With no eligible reviews it
 shows `n/a`. All counts cover cards currently in the folder, excluding removed
@@ -108,15 +112,16 @@ are dots and future days are blank. A muted teal ramp adds colour in terminals;
 block shading remains readable with `NO_COLOR` or redirected output.
 
 Run `drill forecast notes/` for scheduled cards per day from today through the
-next 13 days, plus a separate overdue count. New and removed cards are excluded.
+next 13 days, plus a separate overdue count. New, suspended and removed cards are excluded.
 The chart uses current due dates; it does not predict future grades or repeat
 reviews. Bars scale to fit the terminal; each row includes its exact count.
 Forecast uses the configured database, or `--db FILE` to override it.
 
 Run `drill cards notes/` to list each card's deck, due date, stability in days,
 lapses and question in columns, in file order. New cards show `new` for due and
-`-` for stability. Add `--due` to show only scheduled cards due today or overdue,
-excluding new cards. Removed cards are excluded. The listing uses the configured
+`-` for stability. Suspended cards show `suspended` in the due column.
+Add `--due` to show only scheduled cards due today or overdue,
+excluding new and suspended cards. Removed cards are excluded. The listing uses the configured
 database, or `--db FILE` to override it, and leaves review history unchanged.
 
 ## Where review history lives

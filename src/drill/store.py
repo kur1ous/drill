@@ -13,7 +13,7 @@ from pathlib import Path
 from drill.fsrs import Grade
 from drill.schedule import CardState
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class UnsupportedSchemaError(RuntimeError):
@@ -42,7 +42,8 @@ CREATE TABLE reviews (
     scheduled_days  INTEGER NOT NULL
 );
 CREATE INDEX reviews_card ON reviews (card_id, id);
-""", 2: "ALTER TABLE cards ADD COLUMN question TEXT NOT NULL DEFAULT '';"}
+""", 2: "ALTER TABLE cards ADD COLUMN question TEXT NOT NULL DEFAULT '';",
+    3: "ALTER TABLE cards ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0;"}
 
 
 class Store:
@@ -88,7 +89,7 @@ class Store:
 
     def new_introduced_on(self, day: date) -> int:
         row = self.db.execute(
-            "SELECT COUNT(*) FROM cards WHERE introduced = ?", (day.isoformat(),)
+            "SELECT COUNT(*) FROM cards WHERE introduced = ? AND reps > 0", (day.isoformat(),)
         ).fetchone()
         return row[0]
 
@@ -134,6 +135,17 @@ class Store:
                 break
             streak += 1
         return streak
+
+    def suspend(self, card_id: str, deck: str, question: str, today: date) -> None:
+        with self.db:
+            # A never-reviewed card needs an identity row, but no grade or daily allowance.
+            self.db.execute(
+                "INSERT INTO cards (id, deck, stability, difficulty, due, last_review,"
+                " introduced, reps, lapses, question, suspended) VALUES (?,?,0,0,?,?,?,0,0,?,1)"
+                " ON CONFLICT(id) DO UPDATE SET suspended=1, question=excluded.question",
+                (card_id, deck, today.isoformat(), today.isoformat(), today.isoformat(), question),
+            )
+        self._undo = None
 
     def record(
         self,
@@ -205,4 +217,5 @@ def _state(row: sqlite3.Row) -> CardState:
         introduced=date.fromisoformat(row["introduced"]),
         reps=row["reps"],
         lapses=row["lapses"],
+        suspended=bool(row["suspended"]),
     )

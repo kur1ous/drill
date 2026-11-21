@@ -25,6 +25,7 @@ class CardState:
     introduced: date  # day of the first review; counts against the daily new-card limit
     reps: int = 1
     lapses: int = 0
+    suspended: bool = False
 
 
 def _next_memory(

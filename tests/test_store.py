@@ -34,25 +34,35 @@ def version_one_database(path):
     db.close()
 
 
-def test_version_one_upgrade_preserves_history_and_runs_once(tmp_path):
-    path = tmp_path / "s.db"
+def version_two_database(path):
     version_one_database(path)
+    with sqlite3.connect(path) as db:
+        db.execute("ALTER TABLE cards ADD COLUMN question TEXT NOT NULL DEFAULT ''")
+        db.execute("UPDATE cards SET question = 'Saved question'")
+        db.execute("PRAGMA user_version = 2")
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_upgrade_preserves_history_and_runs_once(tmp_path, version):
+    path = tmp_path / "s.db"
+    (version_one_database if version == 1 else version_two_database)(path)
     db = sqlite3.connect(path)
     before = db.execute("SELECT * FROM cards").fetchone()
     reviews = db.execute("SELECT * FROM reviews").fetchall()
     db.close()
     for _ in range(2):
         with Store(path) as store:
-            assert store.db.execute("PRAGMA user_version").fetchone()[0] == 2
-            assert tuple(store.db.execute("SELECT * FROM cards").fetchone()) == (*before, "")
+            assert store.db.execute("PRAGMA user_version").fetchone()[0] == 3
+            expected = (*before, "", 0) if version == 1 else (*before, 0)
+            assert tuple(store.db.execute("SELECT * FROM cards").fetchone()) == expected
             assert [tuple(r) for r in store.db.execute("SELECT * FROM reviews")] == reviews
             indexes = {r[0] for r in store.db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
             assert {"cards_due", "reviews_card"} <= indexes
             assert store.get("abc").due == DAY2
 
 
-@pytest.mark.parametrize("version", [0, 1])
-@pytest.mark.parametrize("fail_after", ["ALTER TABLE", "PRAGMA user_version = 2"])
+@pytest.mark.parametrize("version", [0, 1, 2])
+@pytest.mark.parametrize("fail_after", ["ALTER TABLE", "PRAGMA user_version = 3"])
 def test_failed_migration_rolls_back_schema_and_version(tmp_path, monkeypatch, version, fail_after):
     class FailingConnection(sqlite3.Connection):
         def execute(self, sql, *args):
@@ -63,7 +73,7 @@ def test_failed_migration_rolls_back_schema_and_version(tmp_path, monkeypatch, v
 
     path = tmp_path / "s.db"
     if version:
-        version_one_database(path)
+        (version_one_database if version == 1 else version_two_database)(path)
     connection = sqlite3.connect(path, factory=FailingConnection)
     before = list(connection.iterdump())
     with monkeypatch.context() as patch:
@@ -77,7 +87,7 @@ def test_failed_migration_rolls_back_schema_and_version(tmp_path, monkeypatch, v
     assert list(db.iterdump()) == before
     db.close()
     with Store(path) as store:
-        assert store.db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert store.db.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def test_question_snapshot_survives_reopen_regrade_and_undo(tmp_path):
@@ -328,7 +338,7 @@ def test_interrupted_setup_closes_and_rolls_back(tmp_path, monkeypatch):
         connection.execute("SELECT 1")
     with Store(path) as store:
         assert store.states() == {}
-        assert store.db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert store.db.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def test_interrupted_grade_rolls_back_and_releases_lock(tmp_path, monkeypatch):
