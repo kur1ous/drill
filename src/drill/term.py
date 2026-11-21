@@ -13,6 +13,7 @@ _ACCENT = "\x1b[38;5;109m"
 _DIM = "\x1b[2m"
 _BOLD = "\x1b[1m"
 _RESET = "\x1b[0m"
+_HEAT_RAMP = (23, 66, 109, 152)
 
 EOF_KEY = "\x04"  # what read_key reports when stdin is closed
 IGNORED_KEY = "\x00"  # arrow keys and the like
@@ -41,6 +42,11 @@ class Terminal:
 
     def accent(self, text: str) -> str:
         return self._wrap(_ACCENT, text)
+
+    def heat(self, level: int) -> str:
+        if level == 0:
+            return self.dim(".")
+        return self._wrap(f"\x1b[38;5;{_HEAT_RAMP[level - 1]}m", "░▒▓█"[level - 1])
 
     def clear(self) -> None:
         if self.ansi:

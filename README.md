@@ -95,6 +95,12 @@ hard, good or easy among logged reviews with at least one day elapsed; first
 introductions and same-day reviews are excluded. With no eligible reviews it
 shows `n/a`. All counts cover cards currently in the folder, excluding removed
 cards. Stats uses the configured database, or `--db FILE` to override it.
+The review heatmap shows the current week through today and the previous 11
+weeks, Monday to Sunday, oldest week on the left. Days use the computer's local
+timezone. Shading counts all logged grades, including introductions and same-day
+reviews; undone grades and unlogged practice repeats do not count. Empty days
+are dots and future days are blank. A muted teal ramp adds colour in terminals;
+block shading remains readable with `NO_COLOR` or redirected output.
 
 ## Where review history lives
 

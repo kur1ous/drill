@@ -104,6 +104,19 @@ class Store:
                 total += count
         return remembered, total
 
+    def review_counts(self, card_ids: set[str], start: date, end: date) -> dict[date, int]:
+        rows = self.db.execute(
+            "SELECT card_id, date(reviewed_at, 'localtime') AS day, COUNT(*)"
+            " FROM reviews WHERE day BETWEEN ? AND ? GROUP BY card_id, day",
+            (start.isoformat(), end.isoformat()),
+        )
+        counts: dict[date, int] = {}
+        for card_id, day, count in rows:
+            if card_id in card_ids:
+                day = date.fromisoformat(day)
+                counts[day] = counts.get(day, 0) + count
+        return counts
+
     def record(
         self,
         prev: CardState | None,
