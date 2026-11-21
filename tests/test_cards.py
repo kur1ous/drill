@@ -1,6 +1,8 @@
 from dataclasses import replace
 from datetime import date, timedelta
+import io
 import re
+import sys
 
 import pytest
 
@@ -9,6 +11,26 @@ from drill.deck import load_deck
 from drill.fsrs import Grade
 from drill.schedule import apply_grade
 from drill.store import Store
+
+
+@pytest.mark.parametrize("deck, question", [
+    ("notes", "What is \u2202f/\u2202x?"),
+    ("\u65e5\u672c\u8a9e", "What does this word mean?"),
+])
+def test_cards_prints_unicode_with_a_legacy_output_encoding(tmp_path, monkeypatch, deck, question):
+    (tmp_path / f"{deck}.md").write_text(f"## {question}\nAnswer\n", encoding="utf-8")
+    raw = io.BytesIO()
+    output = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", output)
+
+    assert main(["cards", str(tmp_path)]) == 0
+
+    output.flush()
+    text = raw.getvalue().decode("utf-8")
+    header, row = text.splitlines()
+    assert "Question" in header
+    assert re.split(r" {2,}", row) == [deck, "new", "-", "0", question]
+    assert "\x1b" not in text
 
 
 def test_suspended_cards_are_listed_but_not_due_or_forecast(tmp_path, capsys):

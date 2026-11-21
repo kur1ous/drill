@@ -22,6 +22,7 @@ def print_cards(folder: Path, db_path: Path, today: date, *, due_only: bool = Fa
             str(state.lapses) if state else "0",
             " ".join(card.question.split()),
         ))
+    system_terminal()
     if not rows:
         print("No due cards." if due_only else "No cards found.")
         return
