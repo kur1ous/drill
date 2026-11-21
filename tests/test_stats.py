@@ -70,19 +70,21 @@ def test_stats_boundaries_and_retention_use_current_cards(tmp_path, capsys, over
     assert not (tmp_path / "unused.sqlite").exists()
 
 
+@pytest.mark.parametrize("command", ["stats", "forecast"])
 @pytest.mark.parametrize("file_exists", [False, True])
-def test_stats_requires_directory(tmp_path, capsys, file_exists):
+def test_stats_requires_directory(tmp_path, capsys, file_exists, command):
     path = tmp_path / "notes.md"
     if file_exists:
         path.write_text("## Q\nA\n", encoding="utf-8")
-    assert main(["stats", str(path)]) == 2
+    assert main([command, str(path)]) == 2
     assert capsys.readouterr().err == f"drill: not a directory: {path}\n"
 
 
-def test_stats_reports_invalid_config(tmp_path, capsys):
+@pytest.mark.parametrize("command", ["stats", "forecast"])
+def test_stats_reports_invalid_config(tmp_path, capsys, command):
     config = tmp_path / ".drill.toml"
     config.write_text("db = 42\n", encoding="utf-8")
-    assert main(["stats", str(tmp_path)]) == 2
+    assert main([command, str(tmp_path)]) == 2
     assert str(config) in capsys.readouterr().err
     assert not (tmp_path / ".drill.db").exists()
 

@@ -28,6 +28,10 @@ def build_parser() -> argparse.ArgumentParser:
     stats.add_argument("dir", type=Path, help="folder of markdown decks")
     stats.add_argument("--db", type=Path, metavar="FILE", help="review history file")
 
+    forecast = sub.add_parser("forecast", help="show scheduled cards for the next 14 days")
+    forecast.add_argument("dir", type=Path, help="folder of markdown decks")
+    forecast.add_argument("--db", type=Path, metavar="FILE", help="review history file")
+
     review = sub.add_parser("review", help="review the cards that are due")
     review.add_argument("dir", type=Path, help="folder of markdown decks or a .md file")
     review.add_argument(
@@ -92,8 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         if not issues:
             print("No issues found.")
         return int(bool(issues))
-    if args.command == "stats":
-        from drill.stats import print_stats
+    if args.command in ("stats", "forecast"):
+        from drill.stats import print_forecast, print_stats
         from drill.store import UnsupportedSchemaError
 
         if not args.dir.is_dir():
@@ -106,7 +110,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         db_path = args.db if args.db is not None else settings.get("db", args.dir / ".drill.db")
         try:
-            print_stats(args.dir, db_path, date.today())
+            report = print_stats if args.command == "stats" else print_forecast
+            report(args.dir, db_path, date.today())
             return 0
         except (DeckReadError, UnsupportedSchemaError) as exc:
             print(f"drill: {exc}", file=sys.stderr)

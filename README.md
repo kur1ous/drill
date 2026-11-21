@@ -102,6 +102,12 @@ reviews; undone grades and unlogged practice repeats do not count. Empty days
 are dots and future days are blank. A muted teal ramp adds colour in terminals;
 block shading remains readable with `NO_COLOR` or redirected output.
 
+Run `drill forecast notes/` for scheduled cards per day from today through the
+next 13 days, plus a separate overdue count. New and removed cards are excluded.
+The chart uses current due dates; it does not predict future grades or repeat
+reviews. Bars scale to fit the terminal; each row includes its exact count.
+Forecast uses the configured database, or `--db FILE` to override it.
+
 ## Where review history lives
 
 Put review defaults in `.drill.toml` in the deck folder (the parent when reviewing

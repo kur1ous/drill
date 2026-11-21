@@ -6,6 +6,41 @@ from drill.store import Store
 from drill.term import Terminal, system_terminal
 
 
+def forecast_bars(counts: dict[date, int], terminal: Terminal) -> str:
+    terminal.refresh_width()
+    peak = max(counts.values(), default=0)
+    digits = len(str(peak))
+    width = max(0, min(40, terminal.width - 14 - digits))
+    scale = max(1, peak)
+    lines = []
+    for day, count in sorted(counts.items()):
+        length = max(1, round(count * min(width, peak) / scale)) if count and width else 0
+        bar = terminal.dim("█" * length) if length else ""
+        lines.append(f"{day}  {count:>{digits}}  {bar}".rstrip())
+    return "\n".join(lines)
+
+
+def print_forecast(folder: Path, db_path: Path, today: date) -> None:
+    cards = load_deck(folder)
+    counts = {today + timedelta(days=offset): 0 for offset in range(14)}
+    overdue = 0
+    with Store(db_path) as store:
+        states = store.states()
+        for card in cards:
+            state = states.get(card.id)
+            if state is None:
+                continue
+            if state.due < today:
+                overdue += 1
+            elif state.due in counts:
+                counts[state.due] += 1
+    terminal = system_terminal()
+    print(f"Overdue: {overdue}")
+    print("Scheduled cards (14 days)")
+    print(f"{today} to {today + timedelta(days=13)}")
+    print(forecast_bars(counts, terminal))
+
+
 def review_heatmap(counts: dict[date, int], today: date, terminal: Terminal) -> str:
     start = today - timedelta(days=today.weekday() + 11 * 7)
     lines = ["Reviews per day (12 weeks, local dates)", f"{start} to {today}"]
