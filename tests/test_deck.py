@@ -205,3 +205,78 @@ def test_check_uses_parser_fences_and_ignores_hidden_paths(tmp_path, marker):
     hidden.mkdir()
     (hidden / "b.md").write_bytes(b"\xff")
     assert check_deck(tmp_path) == []
+
+
+@pytest.mark.parametrize("ending", [" <=>", " <=> ###", " <=> \t"])
+def test_reversed_card_swaps_sides_and_keeps_source_location(ending):
+    cards = parse_markdown(f"# Notes\n## Term{ending}\nDefinition\n\nMore detail.\n", "bio")
+    assert [(c.question, c.answer) for c in cards] == [
+        ("Term", "Definition\n\nMore detail."),
+        ("Definition\n\nMore detail.", "Term"),
+    ]
+    assert [(c.deck, c.line) for c in cards] == [("bio", 2), ("bio", 2)]
+    assert cards[0].id != cards[1].id
+
+
+def test_reverse_marker_must_be_a_separate_heading_suffix():
+    cards = parse_markdown(
+        "## A<=>\none\n## A <=> B\ntwo\n## Plain\nbody <=>\n"
+        "```\n## Inside <=>\n```\n"
+    )
+    assert [c.question for c in cards] == ["A<=>", "A <=> B", "Plain"]
+
+
+def test_reversed_ids_survive_body_edits_and_cosmetic_heading_edits():
+    plain = parse_markdown("## Term?\nOld definition\n")[0]
+    before = parse_markdown("## Term? <=>\nOld definition\n")
+    after = parse_markdown("## *term* <=>\nNew definition\n")
+    assert before[0].id == plain.id
+    assert [c.id for c in before] == [c.id for c in after]
+    different = parse_markdown("## Another term <=>\nOld definition\n")
+    assert set(c.id for c in before).isdisjoint(c.id for c in different)
+
+
+def test_empty_reversed_heading_is_reported_once(tmp_path):
+    text = "## Empty <=>\n \t\n"
+    assert parse_markdown(text) == []
+    assert [(c.question, c.answer) for c in parse_markdown(text, include_empty=True)] == [
+        ("Empty", ""),
+    ]
+    (tmp_path / "empty.md").write_text(text, encoding="utf-8")
+    assert check_deck(tmp_path) == [
+        "empty.md:1: no cards",
+        "empty.md:1: empty body for 'Empty'",
+    ]
+
+
+def test_reversed_duplicates_keep_distinct_stable_ids(tmp_path):
+    path = tmp_path / "a.md"
+    plain = "## Same\nSame\n## Same\nSame\n"
+    path.write_text(plain, encoding="utf-8")
+    original_ids = [c.id for c in load_deck(tmp_path)]
+    path.write_text(plain.replace("## Same", "## Same <=>"), encoding="utf-8")
+    (tmp_path / "b.md").write_text("## Same <=>\nSame\n", encoding="utf-8")
+    cards = load_deck(tmp_path)
+    ids = [c.id for c in cards]
+    assert ids[0:4:2] == original_ids
+    assert len(set(ids)) == 6
+    path.write_text("## Same <=>\nEdited\n## Same <=>\nAlso edited\n", encoding="utf-8")
+    assert [c.id for c in load_deck(tmp_path)] == ids
+
+
+def test_moving_reversed_pair_keeps_both_ids(tmp_path):
+    path = tmp_path / "old.md"
+    path.write_text("## Term <=>\nDefinition\n", encoding="utf-8")
+    before = [c.id for c in load_deck(tmp_path)]
+    path.rename(tmp_path / "new.md")
+    assert [c.id for c in load_deck(tmp_path)] == before
+
+
+def test_check_compares_source_headings_not_generated_reverse_questions(tmp_path):
+    (tmp_path / "a.md").write_text(
+        "## First <=>\nShared answer\n## Second <=>\nShared answer\n"
+        "## First\nOther answer\n", encoding="utf-8",
+    )
+    assert check_deck(tmp_path) == [
+        "a.md:5: duplicate question 'First' (first at a.md:1)",
+    ]

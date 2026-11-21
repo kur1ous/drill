@@ -26,6 +26,7 @@ class Card:
     question: str
     answer: str
     line: int  # 1-based line of the heading, for error messages and editors
+    reverse: bool = False
 
 
 def normalize(question: str) -> str:
@@ -57,9 +58,16 @@ def parse_markdown(text: str, deck: str = "", *, include_empty: bool = False) ->
         if question is None:
             return
         answer = "\n".join(body).strip("\n").rstrip()
+        reversible = question.endswith(" <=>")
+        front = question[:-4].rstrip() if reversible else question
         # A bare heading is a section title, not a card.
         if answer.strip() or include_empty:
-            cards.append(Card(_digest(normalize(question)), deck, question, answer, start))
+            cards.append(Card(_digest(normalize(front)), deck, front, answer, start))
+            if reversible and answer.strip():
+                cards.append(Card(
+                    _digest(normalize(front), "reverse"), deck, answer, front, start,
+                    reverse=True,
+                ))
 
     for number, raw in enumerate(text.lstrip("﻿").splitlines(), start=1):
         line = raw.rstrip("\r")
@@ -119,6 +127,8 @@ def check_deck(root: Path | str) -> list[str]:
         if not any(card.answer.strip() for card in cards):
             issues.append(f"{rel.as_posix()}:1: no cards")
         for card in cards:
+            if card.reverse:
+                continue
             location = f"{rel.as_posix()}:{card.line}"
             if not card.answer.strip():
                 issues.append(f"{location}: empty body for {card.question!r}")
@@ -139,7 +149,8 @@ def load_deck(root: Path | str) -> list[Card]:
     answer, moving the file, or fixing case and punctuation in the question
     keeps its review history. If two cards share a question (same file or not)
     the first keeps the plain id and later ones are salted with their file and
-    position, so each still gets its own schedule.
+    position, so each still gets its own schedule. Reverse cards use the source
+    heading plus a direction marker, keeping both ids stable on answer edits.
     """
     cards: list[Card] = []
     seen: dict[str, int] = {}
@@ -149,9 +160,13 @@ def load_deck(root: Path | str) -> list[Card]:
             n = seen.get(card.id, 0)
             seen[card.id] = n + 1
             if n:
+                source_question = card.answer if card.reverse else card.question
+                parts = (normalize(source_question), deck, str(n))
+                if card.reverse:
+                    parts += ("reverse",)
                 card = Card(
-                    _digest(normalize(card.question), deck, str(n)),
-                    card.deck, card.question, card.answer, card.line,
+                    _digest(*parts),
+                    card.deck, card.question, card.answer, card.line, card.reverse,
                 )
             cards.append(card)
     return cards

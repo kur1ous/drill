@@ -30,6 +30,18 @@ Files can be nested in folders. A heading with no body is treated as a section
 title, not a card. `##` inside a fenced code block is left alone.
 Deck files must be UTF-8 text.
 
+End a heading with ` <=>` to review it in both directions:
+
+```markdown
+## mitochondrion <=>
+organelle that produces most of the cell's ATP
+```
+
+This creates the usual card followed by one with question and answer swapped.
+Each direction has its own schedule. Both IDs come from the original heading,
+so editing the body keeps both histories; adding or removing ` <=>` keeps the
+forward card's history. Empty bodies still produce no cards.
+
 ## Run
 
 ```
