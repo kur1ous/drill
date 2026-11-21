@@ -157,6 +157,10 @@ to both interval previews and saved grades.
 By default, review history lives in `.drill.db` inside the deck folder. Use `db`
 or `--db FILE` to put it elsewhere. It is an ordinary SQLite file: commit it with
 your notes or add it to `.gitignore`.
+Database operations wait up to five seconds for another session's lock.
+Ctrl-C closes the database, keeping committed grades and rolling back any
+unfinished write. During review it shows the stopped summary; if interrupted
+during startup or summary output, it exits with code 130.
 Unreadable decks and database errors (including corruption or locks) report
 the affected file on stderr and exit with code 2, without a traceback.
 

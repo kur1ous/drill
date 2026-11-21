@@ -49,19 +49,23 @@ class Store:
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self._undo: tuple[int, str, CardState | None] | None = None
-        self.db = sqlite3.connect(self.path)
+        self.db = sqlite3.connect(self.path, timeout=5.0)
         try:
             self.db.row_factory = sqlite3.Row
-            version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version == 0:
-                with self.db:
-                    self.db.executescript(_SCHEMA)
+            with self.db:
+                # Serialize first-time setup and roll it back if interrupted.
+                self.db.execute("BEGIN IMMEDIATE")
+                version = self.db.execute("PRAGMA user_version").fetchone()[0]
+                if version == 0:
+                    for statement in _SCHEMA.split(";"):
+                        if statement.strip():
+                            self.db.execute(statement)
                     self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            elif version != SCHEMA_VERSION:
-                raise UnsupportedSchemaError(
-                    f"{self.path} has schema version {version}, this drill expects {SCHEMA_VERSION}"
-                )
-        except Exception:
+                elif version != SCHEMA_VERSION:
+                    raise UnsupportedSchemaError(
+                        f"{self.path} has schema version {version}, this drill expects {SCHEMA_VERSION}"
+                    )
+        except BaseException:
             self.db.close()
             raise
 

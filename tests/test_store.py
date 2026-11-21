@@ -1,5 +1,7 @@
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import date, datetime, timezone
+from threading import Event
 
 import pytest
 
@@ -80,7 +82,7 @@ def test_failed_initialization_closes_connection(tmp_path, monkeypatch):
     path = tmp_path / "broken.db"
     path.write_bytes(b"not a sqlite database")
     connection = sqlite3.connect(path)
-    monkeypatch.setattr("drill.store.sqlite3.connect", lambda path: connection)
+    monkeypatch.setattr("drill.store.sqlite3.connect", lambda path, **kwargs: connection)
     with pytest.raises(sqlite3.DatabaseError, match="not a database"):
         Store(path)
     with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
@@ -146,3 +148,85 @@ def test_undo_does_not_remove_another_sessions_review(tmp_path):
         assert not store.undo()
         assert store.get("abc") == second
         assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("during_setup", [False, True])
+def test_busy_store_waits_for_other_connection(tmp_path, during_setup):
+    path = tmp_path / "s.db"
+    ready, blocked = Event(), Event()
+    new = apply_grade(None, "abc", "bio", Grade.GOOD, DAY1)
+
+    def writer():
+        if during_setup:
+            ready.set()
+            assert blocked.wait(2)
+        with Store(path) as store:
+            assert store.db.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+            if not during_setup:
+                ready.set()
+                assert blocked.wait(2)
+            store.record(None, new, Grade.GOOD)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(writer)
+        assert ready.wait(2)
+        blocker = sqlite3.connect(path)
+        try:
+            blocker.execute("BEGIN IMMEDIATE")
+            blocked.set()
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.05)
+        finally:
+            blocker.rollback()
+            blocker.close()
+            blocked.set()
+        future.result(timeout=2)
+    with Store(path) as store:
+        assert store.get("abc") == new
+        assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 1
+        assert store.db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_interrupted_setup_closes_and_rolls_back(tmp_path, monkeypatch):
+    class InterruptedConnection(sqlite3.Connection):
+        def execute(self, sql, *args):
+            result = super().execute(sql, *args)
+            if "CREATE TABLE cards" in sql:
+                raise KeyboardInterrupt
+            return result
+
+    path = tmp_path / "s.db"
+    connection = sqlite3.connect(path, factory=InterruptedConnection)
+    with monkeypatch.context() as patch:
+        patch.setattr("drill.store.sqlite3.connect", lambda path, **kwargs: connection)
+        with pytest.raises(KeyboardInterrupt):
+            Store(path)
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1")
+    with Store(path) as store:
+        assert store.states() == {}
+        assert store.db.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_interrupted_grade_rolls_back_and_releases_lock(tmp_path, monkeypatch):
+    path = tmp_path / "s.db"
+    first = apply_grade(None, "abc", "bio", Grade.GOOD, DAY1)
+    second = apply_grade(first, "abc", "bio", Grade.HARD, DAY2)
+    with pytest.raises(KeyboardInterrupt):
+        with Store(path) as store:
+            store.record(None, first, Grade.GOOD)
+            save = store._save
+
+            def interrupt(state):
+                save(state)
+                raise KeyboardInterrupt
+
+            monkeypatch.setattr(store, "_save", interrupt)
+            store.record(first, second, Grade.HARD)
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        store.db.execute("SELECT 1")
+    with Store(path) as other:
+        assert other.get("abc") == first
+        assert other.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 1
+        other.record(first, second, Grade.HARD)
+        assert other.get("abc") == second

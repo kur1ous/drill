@@ -124,5 +124,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"drill: {exc}", file=sys.stderr)
         except sqlite3.Error as exc:
             print(f"drill: cannot use database {db_path}: {exc}", file=sys.stderr)
+        except KeyboardInterrupt:
+            print("drill: stopped.", file=sys.stderr)
+            return 130
         return 2
     return 0

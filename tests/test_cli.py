@@ -477,10 +477,10 @@ def test_locked_database_reports_file(deck_file, monkeypatch, capsys, lock):
     path = deck_file.parent / "history.sqlite"
     Store(path).close()
     connect = sqlite3.connect
-    monkeypatch.setattr("drill.store.sqlite3.connect", lambda path: connect(path, timeout=0))
+    monkeypatch.setattr("drill.store.sqlite3.connect", lambda path, **kwargs: connect(path, timeout=0))
     blocker = connect(path)
     try:
-        # EXCLUSIVE blocks startup; IMMEDIATE allows reads but blocks saving a grade.
+        # Both lock modes block the startup transaction.
         blocker.execute(f"BEGIN {lock}")
         assert main(["review", str(deck_file.parent), "--db", str(path)]) == 2
         error = capsys.readouterr().err
@@ -493,6 +493,30 @@ def test_locked_database_reports_file(deck_file, monkeypatch, capsys, lock):
     with Store(path) as store:
         assert store.states() == {}
         assert store.db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("read_number", [1, 3])
+def test_interrupt_during_queue_or_summary_closes_database(
+    deck_file, monkeypatch, capsys, read_number,
+):
+    connections = []
+    states = Store.states
+
+    def interrupted_states(store):
+        connections.append(store.db)
+        if len(connections) == read_number:
+            raise KeyboardInterrupt
+        return states(store)
+
+    monkeypatch.setattr(Store, "states", interrupted_states)
+    keys = iter("q")
+    monkeypatch.setattr("drill.term.system_terminal", lambda: Terminal(
+        lambda text: None, lambda: next(keys, EOF_KEY), ansi=False,
+    ))
+    assert main(["review", str(deck_file.parent)]) == 130
+    assert capsys.readouterr().err == "drill: stopped.\n"
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connections[0].execute("SELECT 1")
 
 
 @pytest.mark.parametrize("custom_db", [False, True])
