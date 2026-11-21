@@ -92,6 +92,18 @@ class Store:
         ).fetchone()
         return row[0]
 
+    def retention_counts(self, card_ids: set[str]) -> tuple[int, int]:
+        rows = self.db.execute(
+            "SELECT card_id, SUM(grade > ?), COUNT(*) FROM reviews"
+            " WHERE elapsed_days > 0 GROUP BY card_id", (int(Grade.AGAIN),),
+        )
+        remembered = total = 0
+        for card_id, successes, count in rows:
+            if card_id in card_ids:
+                remembered += successes
+                total += count
+        return remembered, total
+
     def record(
         self,
         prev: CardState | None,

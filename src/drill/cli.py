@@ -24,6 +24,10 @@ def build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check", help="check decks for empty cards and duplicates")
     check.add_argument("dir", type=Path, help="folder of markdown decks")
 
+    stats = sub.add_parser("stats", help="show card states, due count and retention")
+    stats.add_argument("dir", type=Path, help="folder of markdown decks")
+    stats.add_argument("--db", type=Path, metavar="FILE", help="review history file")
+
     review = sub.add_parser("review", help="review the cards that are due")
     review.add_argument("dir", type=Path, help="folder of markdown decks or a .md file")
     review.add_argument(
@@ -88,6 +92,30 @@ def main(argv: list[str] | None = None) -> int:
         if not issues:
             print("No issues found.")
         return int(bool(issues))
+    if args.command == "stats":
+        from drill.stats import print_stats
+        from drill.store import UnsupportedSchemaError
+
+        if not args.dir.is_dir():
+            print(f"drill: not a directory: {args.dir}", file=sys.stderr)
+            return 2
+        try:
+            settings = load_config(args.dir)
+        except ConfigError as exc:
+            print(f"drill: {exc}", file=sys.stderr)
+            return 2
+        db_path = args.db if args.db is not None else settings.get("db", args.dir / ".drill.db")
+        try:
+            print_stats(args.dir, db_path, date.today())
+            return 0
+        except (DeckReadError, UnsupportedSchemaError) as exc:
+            print(f"drill: {exc}", file=sys.stderr)
+        except sqlite3.Error as exc:
+            print(f"drill: cannot use database {db_path}: {exc}", file=sys.stderr)
+        except KeyboardInterrupt:
+            print("drill: stopped.", file=sys.stderr)
+            return 130
+        return 2
     if args.command == "review":
         from drill.session import run_review
         from drill.store import UnsupportedSchemaError

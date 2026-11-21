@@ -88,6 +88,14 @@ Questions are compared as parsed, including case, punctuation and emphasis.
 Hidden files and folders are skipped, as in review. The check leaves review history
 untouched and exits with code 0 for no issues, 1 for findings, or 2 for read errors.
 
+Run `drill stats notes/` for counts of new, learning (scheduled interval at most
+one day), young (2-20 days), and mature (at least 21 days) cards. Due today includes
+overdue cards, excluding new cards. Retention is the all-time fraction graded
+hard, good or easy among logged reviews with at least one day elapsed; first
+introductions and same-day reviews are excluded. With no eligible reviews it
+shows `n/a`. All counts cover cards currently in the folder, excluding removed
+cards. Stats uses the configured database, or `--db FILE` to override it.
+
 ## Where review history lives
 
 Put review defaults in `.drill.toml` in the deck folder (the parent when reviewing
