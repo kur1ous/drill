@@ -674,6 +674,32 @@ def test_render_answer_wraps_prose_and_keeps_code():
     assert lines[item + 1].startswith("      ")  # continuation hangs under the text
 
 
+@pytest.mark.parametrize("opener, literal_fence, closer", [
+    ("````", "```", "````"),
+    ("~~~", "```", "~~~"),
+    ("```", "~~~", "```"),
+    ("```", "``` text", "```"),
+    ("~~~", "~~~text", "  ~~~~ \t"),
+    ("```", "    ```", "```"),
+])
+@pytest.mark.parametrize("ansi", [False, True])
+def test_render_answer_keeps_code_until_matching_fence(opener, literal_fence, closer, ansi):
+    term = Fake("")
+    term.ansi = ansi
+    card, = parse_markdown(
+        f"## Show fences\n{opener}\n{literal_fence}\nx =  1\ny =  2\n"
+        f"{closer}\nProse continues\non the next line.\n"
+    )
+    assert render_answer(term, card.answer) == [
+        "    " + term.dim(opener),
+        "    " + term.accent(literal_fence),
+        "    " + term.accent("x =  1"),
+        "    " + term.accent("y =  2"),
+        "    " + term.dim(closer.strip()),
+        "    Prose continues on the next line.",
+    ]
+
+
 def test_cli_rejects_missing_directory(tmp_path, capsys):
     assert main(["review", str(tmp_path / "nope")]) == 2
     assert "not a directory" in capsys.readouterr().err

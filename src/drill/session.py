@@ -13,7 +13,7 @@ from pathlib import Path
 from time import monotonic
 
 from drill.config import deck_settings
-from drill.deck import _CLOZE, Card, load_deck
+from drill.deck import _CLOZE, _FENCE, Card, load_deck
 from drill.fsrs import DEFAULT_WEIGHTS, Grade
 from drill.schedule import CardState, apply_grade, preview_intervals
 from drill.store import Store
@@ -105,7 +105,7 @@ def render_answer(term: Terminal, answer: str) -> list[str]:
     margin, width = _layout(term)
     out: list[str] = []
     para: list[str] = []
-    fence = False
+    fence: str | None = None
 
     def flush() -> None:
         if para:
@@ -120,9 +120,16 @@ def render_answer(term: Terminal, answer: str) -> list[str]:
 
     for line in answer.splitlines():
         stripped = line.strip()
-        if stripped.startswith(("```", "~~~")):
+        marker = _FENCE.match(line)
+        if marker and (
+            fence is None or (
+                marker[1][0] == fence[0]
+                and len(marker[1]) >= len(fence)
+                and not line[marker.end():].strip()
+            )
+        ):
             flush()
-            fence = not fence
+            fence = marker[1] if fence is None else None
             literal(stripped, term.dim)
         elif fence:
             literal(line, term.accent)
