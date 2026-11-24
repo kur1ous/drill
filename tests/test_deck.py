@@ -78,6 +78,18 @@ def test_top_level_heading_ends_a_card():
     assert cards[0].answer == "ans"
 
 
+@pytest.mark.parametrize("title", ["#\tNext chapter", "#\t", "#\t \tNext chapter"])
+@pytest.mark.parametrize("answer", ["ans\n", ""])
+def test_tab_separated_title_ends_a_card(title, answer):
+    cards = parse_markdown(
+        f"## A\n{answer}{title}\nchapter introduction\n##\tB\nnext answer\n"
+    )
+    expected = [("B", "next answer")]
+    if answer:
+        expected.insert(0, ("A", "ans"))
+    assert [(card.question, card.answer) for card in cards] == expected
+
+
 def test_crlf_and_bom():
     text = "﻿## Q one\r\nfirst\r\n\r\n## Q two\r\nsecond\r\n"
     cards = parse_markdown(text)

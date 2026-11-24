@@ -114,6 +114,24 @@ def test_review_cli_caps_session(tmp_path, monkeypatch):
         assert len(store.states()) == 1
 
 
+def test_review_excludes_tab_separated_chapter_from_answer(tmp_path, monkeypatch):
+    (tmp_path / "notes.md").write_text(
+        "## Question\nAnswer text\n#\tNext chapter\nChapter introduction\n",
+        encoding="utf-8",
+    )
+    keys = iter("b q")
+    output = []
+    monkeypatch.setattr(
+        "drill.term.system_terminal",
+        lambda: Terminal(output.append, lambda: next(keys, EOF_KEY), ansi=False),
+    )
+    assert main(["review", str(tmp_path)]) == 0
+    text = "".join(output)
+    assert "Answer text" in text
+    assert "Next chapter" not in text
+    assert "Chapter introduction" not in text
+
+
 @pytest.mark.parametrize("order, first", [
     (None, "Three"), ("due", "Three"), ("random", "Two"), ("deck", "One"),
 ])

@@ -93,7 +93,7 @@ def parse_markdown(text: str, deck: str = "", *, include_empty: bool = False) ->
             ):
                 fence = None
         elif fence is None:
-            if line.startswith("# ") or line == "#":
+            if line.startswith(("# ", "#\t")) or line == "#":
                 # A top-level title ends the previous card.
                 flush()
                 question = None
